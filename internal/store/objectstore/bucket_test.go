@@ -21,7 +21,7 @@ func TestEnsureBucketRejectsMissingRetention(t *testing.T) {
 	}
 }
 
-func TestEnsureBucketCreatesAndVerifiesComplianceRetention(t *testing.T) {
+func TestEnsureBucketConfiguresAndVerifiesComplianceRetention(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		requests = append(requests, request.Method+" "+request.URL.RequestURI())
@@ -30,7 +30,7 @@ func TestEnsureBucketCreatesAndVerifiesComplianceRetention(t *testing.T) {
 			if request.Method != http.MethodPut || request.Header.Get("X-Amz-Bucket-Object-Lock-Enabled") != "true" {
 				t.Fatalf("bucket creation = %s with object lock %q", request.Method, request.Header.Get("X-Amz-Bucket-Object-Lock-Enabled"))
 			}
-			response.WriteHeader(http.StatusOK)
+			response.WriteHeader(http.StatusConflict)
 		case 2:
 			if request.Method != http.MethodPut || request.URL.Query().Get("object-lock") != "" || !strings.Contains(request.Header.Get("Content-Type"), "application/xml") {
 				t.Fatalf("retention configuration request = %s %s", request.Method, request.URL.RequestURI())

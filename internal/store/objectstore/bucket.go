@@ -104,7 +104,7 @@ func (bucket Bucket) EnsureBucket(ctx context.Context) error {
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusConflict {
 		return fmt.Errorf("create evidence bucket: object storage answered %s", response.Status)
 	}
-	if response.StatusCode == http.StatusOK {
+	if response.StatusCode == http.StatusOK || response.StatusCode == http.StatusConflict {
 		if err := bucket.configureObjectLock(ctx); err != nil {
 			return err
 		}

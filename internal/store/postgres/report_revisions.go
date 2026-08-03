@@ -53,7 +53,7 @@ func ApproveReportRevision(ctx context.Context, pool interface {
 	if err != nil {
 		return ReportRevision{}, fmt.Errorf("approve report revision: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'report.revision.approved', 'report_revision', $3, 'success', gen_random_uuid(), jsonb_build_object('engagementId', $4::uuid, 'sha256', $5, 'byteSize', $6))`, session.OrganizationID, session.UserID, revision.ID, revision.EngagementID, revision.SHA256, revision.ByteSize); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'report.revision.approved', 'report_revision', $3, 'success', gen_random_uuid(), jsonb_build_object('engagementId', $4::uuid, 'sha256', $5::text, 'byteSize', $6::bigint))`, session.OrganizationID, session.UserID, revision.ID, revision.EngagementID, revision.SHA256, revision.ByteSize); err != nil {
 		return ReportRevision{}, fmt.Errorf("audit report approval: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

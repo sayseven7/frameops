@@ -26,7 +26,7 @@ CREATE INDEX report_revisions_organization_id_engagement_id_idx ON report_revisi
 CREATE FUNCTION prevent_report_revision_rewrite() RETURNS TRIGGER AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'report revisions are immutable'; END IF;
-    IF (NEW.id, NEW.organization_id, NEW.engagement_id, NEW.storage_key, NEW.filename, NEW.sha256, NEW.byte_size, NEW.received_at, NEW.imported_by) IS DISTINCT FROM (OLD.id, OLD.organization_id, OLD.engagement_id, OLD.storage_key, OLD.filename, OLD.sha256, OLD.byte_size, OLD.received_at, OLD.imported_by) THEN RAISE EXCEPTION 'report revision metadata is immutable'; END IF;
+    IF NEW.id IS DISTINCT FROM OLD.id OR NEW.organization_id IS DISTINCT FROM OLD.organization_id OR NEW.engagement_id IS DISTINCT FROM OLD.engagement_id OR NEW.filename IS DISTINCT FROM OLD.filename OR NEW.sha256 IS DISTINCT FROM OLD.sha256 OR NEW.byte_size IS DISTINCT FROM OLD.byte_size OR NEW.received_at IS DISTINCT FROM OLD.received_at OR NEW.imported_by IS DISTINCT FROM OLD.imported_by THEN RAISE EXCEPTION 'report revision metadata is immutable'; END IF;
     IF OLD.state = 'pending' AND NEW.state = 'stored' AND OLD.stored_at IS NULL AND NEW.stored_at IS NOT NULL AND OLD.approved_at IS NULL AND NEW.approved_at IS NULL AND OLD.approved_by IS NULL AND NEW.approved_by IS NULL THEN RETURN NEW; END IF;
     IF OLD.state = 'stored' AND NEW.state = 'stored' AND OLD.stored_at = NEW.stored_at AND OLD.approved_at IS NULL AND NEW.approved_at IS NOT NULL AND OLD.approved_by IS NULL AND NEW.approved_by IS NOT NULL THEN RETURN NEW; END IF;
     RAISE EXCEPTION 'report revisions allow only pending to stored and one stored approval transition';

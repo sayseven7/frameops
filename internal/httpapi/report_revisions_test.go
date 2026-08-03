@@ -76,7 +76,7 @@ func TestReportRevisionApprovalIsScopedAndConflicts(t *testing.T) {
 	close(start)
 	statuses := []int{<-responses, <-responses}
 	sort.Ints(statuses)
-	if want := []int{http.StatusConflict, http.StatusOK}; statuses[0] != want[0] || statuses[1] != want[1] {
+	if want := []int{http.StatusOK, http.StatusConflict}; statuses[0] != want[0] || statuses[1] != want[1] {
 		t.Fatalf("concurrent approval statuses = %v, want %v", statuses, want)
 	}
 }
