@@ -174,6 +174,60 @@ func TestAuthenticatedOrganizationPortfolio(t *testing.T) {
 		t.Fatalf("missing finding assets status = %d, want %d", missingFinding.Code, http.StatusNotFound)
 	}
 
+	malformedFinding := request(t, server, http.MethodGet, "/v1/findings/not-a-uuid/assets", "", cookie, "")
+	if malformedFinding.Code != http.StatusNotFound {
+		t.Fatalf("malformed finding identifier status = %d, want %d: %s", malformedFinding.Code, http.StatusNotFound, malformedFinding.Body.String())
+	}
+
+	memberCookie, memberCSRF := signIn(t, ctx, server, pool, admin.OrganizationID, "member", "triage-member@example.test")
+	triagePath := "/v1/findings/" + url.PathEscape(findingBody.ID) + "/triage"
+	const confirmOpen = `{"validationState":"confirmed","remediationState":"open"}`
+	if uncsrfed := request(t, server, http.MethodPut, triagePath, confirmOpen, memberCookie, ""); uncsrfed.Code != http.StatusForbidden {
+		t.Fatalf("triage without CSRF status = %d, want %d", uncsrfed.Code, http.StatusForbidden)
+	}
+	for _, target := range []string{
+		`{"validationState":"new","remediationState":null}`,
+		`{"validationState":"needs_review","remediationState":null}`,
+		`{"validationState":"false_positive","remediationState":null}`,
+		`{"validationState":"confirmed","remediationState":null}`,
+		`{"validationState":"confirmed","remediationState":"fixed"}`,
+	} {
+		rejected := request(t, server, http.MethodPut, triagePath, target, memberCookie, memberCSRF)
+		if rejected.Code != http.StatusBadRequest {
+			t.Fatalf("triage target %s status = %d, want %d: %s", target, rejected.Code, http.StatusBadRequest, rejected.Body.String())
+		}
+	}
+	triaged := request(t, server, http.MethodPut, triagePath, confirmOpen, memberCookie, memberCSRF)
+	if triaged.Code != http.StatusOK {
+		t.Fatalf("triage status = %d, want %d: %s", triaged.Code, http.StatusOK, triaged.Body.String())
+	}
+	for _, fragment := range []string{`"validationState":"confirmed"`, `"remediationState":"open"`, `"cvssScore":9.8`, `"title":"SQL injection"`} {
+		if !strings.Contains(triaged.Body.String(), fragment) {
+			t.Fatalf("triage body = %s, want fragment %s", triaged.Body.String(), fragment)
+		}
+	}
+	confirmed := request(t, server, http.MethodGet, "/v1/engagements/"+url.PathEscape(engagementBody.ID)+"/findings", "", memberCookie, "")
+	if confirmed.Code != http.StatusOK || !strings.Contains(confirmed.Body.String(), `"validationState":"confirmed"`) || !strings.Contains(confirmed.Body.String(), `"remediationState":"open"`) {
+		t.Fatalf("listed findings after triage status = %d, body=%s", confirmed.Code, confirmed.Body.String())
+	}
+	replay := request(t, server, http.MethodPut, triagePath, confirmOpen, memberCookie, memberCSRF)
+	if replay.Code != http.StatusConflict || !strings.Contains(replay.Body.String(), "invalid_state") {
+		t.Fatalf("triage replay status = %d, want %d invalid_state: %s", replay.Code, http.StatusConflict, replay.Body.String())
+	}
+
+	var outsiderOrganizationID string
+	if err := pool.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Outside Organization') RETURNING id`).Scan(&outsiderOrganizationID); err != nil {
+		t.Fatalf("create outside organization: %v", err)
+	}
+	outsiderCookie, outsiderCSRF := signIn(t, ctx, server, pool, outsiderOrganizationID, "admin", "triage-outsider@example.test")
+	if outsider := request(t, server, http.MethodPut, triagePath, confirmOpen, outsiderCookie, outsiderCSRF); outsider.Code != http.StatusNotFound {
+		t.Fatalf("cross-organization triage status = %d, want %d: %s", outsider.Code, http.StatusNotFound, outsider.Body.String())
+	}
+	unknown := request(t, server, http.MethodPut, "/v1/findings/00000000-0000-0000-0000-000000000000/triage", confirmOpen, memberCookie, memberCSRF)
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown finding triage status = %d, want %d", unknown.Code, http.StatusNotFound)
+	}
+
 	logout := request(t, server, http.MethodPost, "/v1/session/logout", "", cookie, csrfBody.Token)
 	if logout.Code != http.StatusNoContent {
 		t.Fatalf("logout status = %d, want %d", logout.Code, http.StatusNoContent)
@@ -197,6 +251,40 @@ func TestAuthenticatedOrganizationPortfolio(t *testing.T) {
 	if count := auditCount(t, ctx, pool, admin.OrganizationID, "finding.assets.replaced"); count != 2 {
 		t.Fatalf("finding asset audit events = %d, want 2", count)
 	}
+	if count := auditCount(t, ctx, pool, admin.OrganizationID, "finding.triage.confirmed"); count != 1 {
+		t.Fatalf("finding triage audit events = %d, want 1", count)
+	}
+}
+
+// signIn provisions one organization member and returns its session cookie and
+// a fresh CSRF token so tests can act as a role other than the first admin.
+func signIn(t *testing.T, ctx context.Context, handler http.Handler, pool *pgxpool.Pool, organizationID, role, email string) (*http.Cookie, string) {
+	t.Helper()
+	const password = "correct horse battery staple"
+	passwordHash, err := postgres.HashPassword(password)
+	if err != nil {
+		t.Fatalf("hash %q password: %v", email, err)
+	}
+	var userID string
+	if err := pool.QueryRow(ctx, `INSERT INTO users (display_name, email, password_hash) VALUES ($1, $2, $3) RETURNING id`, email, email, passwordHash).Scan(&userID); err != nil {
+		t.Fatalf("create %q user: %v", email, err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO organization_memberships (organization_id, user_id, role) VALUES ($1, $2, $3)`, organizationID, userID, role); err != nil {
+		t.Fatalf("create %q membership: %v", email, err)
+	}
+	login := request(t, handler, http.MethodPost, "/v1/session/login", `{"email":"`+email+`","password":"`+password+`"}`, nil, "")
+	if login.Code != http.StatusNoContent {
+		t.Fatalf("login %q status = %d, body=%s", email, login.Code, login.Body.String())
+	}
+	cookie := login.Result().Cookies()[0]
+	csrf := request(t, handler, http.MethodGet, "/v1/csrf", "", cookie, "")
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(csrf.Body).Decode(&body); err != nil || csrf.Code != http.StatusOK || body.Token == "" {
+		t.Fatalf("issue %q csrf = %v, status = %d, body=%s", email, err, csrf.Code, csrf.Body.String())
+	}
+	return cookie, body.Token
 }
 
 func createAsset(t *testing.T, handler http.Handler, cookie *http.Cookie, csrf, path, name string) string {

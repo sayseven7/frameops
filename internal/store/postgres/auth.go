@@ -31,6 +31,7 @@ var (
 	ErrUnauthorized  = errors.New("unauthorized")
 	ErrForbidden     = errors.New("forbidden")
 	ErrNotFound      = errors.New("not found")
+	ErrInvalidState  = errors.New("invalid state")
 )
 
 type Pool interface {
@@ -456,6 +457,43 @@ func CreateFinding(ctx context.Context, pool interface {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Finding{}, fmt.Errorf("commit finding transaction: %w", err)
+	}
+	return finding, nil
+}
+
+// TriageFinding applies the only supported triage edge: a finding still in
+// 'new' with no remediation state becomes 'confirmed' and 'open'. Ownership and
+// the current state are one predicate on the update itself, so a replay or a
+// concurrent caller either performs the whole edge or changes nothing, and a
+// finding owned by another organization is indistinguishable from a missing one.
+func TriageFinding(ctx context.Context, pool interface {
+	Begin(context.Context) (pgx.Tx, error)
+}, session Session, findingID string) (Finding, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Finding{}, fmt.Errorf("begin finding triage transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var finding Finding
+	err = tx.QueryRow(ctx, `UPDATE findings SET validation_state = 'confirmed', remediation_state = 'open' WHERE organization_id = $1 AND id = $2 AND validation_state = 'new' AND remediation_state IS NULL RETURNING id, engagement_id, title, description, impact, remediation, reproduction, cvss_vector, cvss_score, validation_state, remediation_state, created_at`, session.OrganizationID, findingID).Scan(&finding.ID, &finding.EngagementID, &finding.Title, &finding.Description, &finding.Impact, &finding.Remediation, &finding.Reproduction, &finding.CVSSVector, &finding.CVSSScore, &finding.ValidationState, &finding.RemediationState, &finding.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM findings WHERE organization_id = $1 AND id = $2)`, session.OrganizationID, findingID).Scan(&exists); err != nil {
+			return Finding{}, fmt.Errorf("find finding: %w", err)
+		}
+		if !exists {
+			return Finding{}, ErrNotFound
+		}
+		return Finding{}, ErrInvalidState
+	}
+	if err != nil {
+		return Finding{}, fmt.Errorf("triage finding: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'finding.triage.confirmed', 'finding', $3, 'success', gen_random_uuid(), '{}'::jsonb)`, session.OrganizationID, session.UserID, finding.ID); err != nil {
+		return Finding{}, fmt.Errorf("audit finding triage: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Finding{}, fmt.Errorf("commit finding triage transaction: %w", err)
 	}
 	return finding, nil
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sayseven7/frameops/internal/domain"
 	"github.com/sayseven7/frameops/internal/store/postgres"
@@ -41,6 +42,8 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.assets(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/findings/") && strings.HasSuffix(request.URL.Path, "/assets"):
 		server.findingAssets(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/findings/") && strings.HasSuffix(request.URL.Path, "/triage"):
+		server.triage(response, request)
 	default:
 		writeError(response, http.StatusNotFound, "not_found")
 	}
@@ -139,8 +142,8 @@ func (server Server) clients(response http.ResponseWriter, request *http.Request
 }
 
 func (server Server) engagements(response http.ResponseWriter, request *http.Request) {
-	clientID := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/clients/"), "/engagements")
-	if clientID == "" || strings.Contains(clientID, "/") {
+	clientID, ok := pathID(request.URL.Path, "/v1/clients/", "/engagements")
+	if !ok {
 		writeError(response, http.StatusNotFound, "not_found")
 		return
 	}
@@ -185,8 +188,8 @@ func (server Server) engagements(response http.ResponseWriter, request *http.Req
 }
 
 func (server Server) findings(response http.ResponseWriter, request *http.Request) {
-	engagementID := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/engagements/"), "/findings")
-	if engagementID == "" || strings.Contains(engagementID, "/") {
+	engagementID, ok := pathID(request.URL.Path, "/v1/engagements/", "/findings")
+	if !ok {
 		writeError(response, http.StatusNotFound, "not_found")
 		return
 	}
@@ -244,8 +247,8 @@ func (server Server) findings(response http.ResponseWriter, request *http.Reques
 const maxFindingAssets = 64
 
 func (server Server) assets(response http.ResponseWriter, request *http.Request) {
-	engagementID := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/engagements/"), "/assets")
-	if engagementID == "" || strings.Contains(engagementID, "/") {
+	engagementID, ok := pathID(request.URL.Path, "/v1/engagements/", "/assets")
+	if !ok {
 		writeError(response, http.StatusNotFound, "not_found")
 		return
 	}
@@ -289,8 +292,8 @@ func (server Server) assets(response http.ResponseWriter, request *http.Request)
 }
 
 func (server Server) findingAssets(response http.ResponseWriter, request *http.Request) {
-	findingID := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/findings/"), "/assets")
-	if findingID == "" || strings.Contains(findingID, "/") {
+	findingID, ok := pathID(request.URL.Path, "/v1/findings/", "/assets")
+	if !ok {
 		writeError(response, http.StatusNotFound, "not_found")
 		return
 	}
@@ -331,6 +334,57 @@ func (server Server) findingAssets(response http.ResponseWriter, request *http.R
 	default:
 		writeError(response, http.StatusNotFound, "not_found")
 	}
+}
+
+// triage moves one finding along the only supported validation edge: a finding
+// still in 'new' with no remediation state becomes 'confirmed' and 'open'. Any
+// other target pair is refused before the store is reached; the store owns the
+// current-state decision so a replay cannot be mistaken for a missing finding.
+func (server Server) triage(response http.ResponseWriter, request *http.Request) {
+	findingID, ok := pathID(request.URL.Path, "/v1/findings/", "/triage")
+	if !ok || request.Method != http.MethodPut {
+		writeError(response, http.StatusNotFound, "not_found")
+		return
+	}
+	session, ok := server.session(response, request, true)
+	if !ok {
+		return
+	}
+	var input struct {
+		ValidationState  string  `json:"validationState"`
+		RemediationState *string `json:"remediationState"`
+	}
+	if !decodeJSON(request, &input) || input.ValidationState != "confirmed" || input.RemediationState == nil || *input.RemediationState != "open" {
+		writeError(response, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	finding, err := postgres.TriageFinding(request.Context(), server.pool, session, findingID)
+	switch {
+	case errors.Is(err, postgres.ErrNotFound):
+		writeError(response, http.StatusNotFound, "not_found")
+	case errors.Is(err, postgres.ErrInvalidState):
+		writeError(response, http.StatusConflict, "invalid_state")
+	case err != nil:
+		writeError(response, http.StatusInternalServerError, "internal_error")
+	default:
+		writeJSON(response, http.StatusOK, finding)
+	}
+}
+
+// pathID reads the single identifier a route carries between its prefix and its
+// suffix. An identifier PostgreSQL could not read as a UUID is reported as an
+// absent route rather than forwarded, so a malformed path is a 404 instead of a
+// database error, and it never reveals whether the identifier could exist.
+func pathID(path, prefix, suffix string) (string, bool) {
+	id := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	if strings.Contains(id, "/") {
+		return "", false
+	}
+	var parsed pgtype.UUID
+	if err := parsed.Scan(id); err != nil {
+		return "", false
+	}
+	return id, true
 }
 
 func (server Server) session(response http.ResponseWriter, request *http.Request, requireCSRF bool) (postgres.Session, bool) {
