@@ -625,3 +625,90 @@ func TestAuditEventsAreAppendOnlyAndActorsBelongToTheirOrganization(t *testing.T
 		t.Fatalf("insert audit event after rejected mutations: %v", err)
 	}
 }
+
+// TestToolIngestionsRecordOneArtifactOnceAndImmutably covers the schema
+// guarantees the ingestion slice depends on: an engagement identifies an asset
+// by name, the same artifact is imported at most once, an imported asset always
+// names the ingestion that created it, and a recorded summary can never be
+// rewritten or made arithmetically incoherent.
+func TestToolIngestionsRecordOneArtifactOnceAndImmutably(t *testing.T) {
+	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("FRAMEOPS_DATABASE_URL is required for schema integration tests")
+	}
+
+	ctx := context.Background()
+	connection, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to schema test database: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := connection.Close(ctx); err != nil {
+			t.Errorf("close schema test database connection: %v", err)
+		}
+	})
+
+	var organizationID, userID, clientID, engagementID string
+	if err := connection.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Ingestion Organization') RETURNING id`).Scan(&organizationID); err != nil {
+		t.Fatalf("create synthetic organization: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO users (display_name, email) VALUES ('Ingestion Operator', 'ingestion-operator@example.test') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("create synthetic user: %v", err)
+	}
+	if _, err := connection.Exec(ctx, `INSERT INTO organization_memberships (organization_id, user_id, role) VALUES ($1, $2, 'member')`, organizationID, userID); err != nil {
+		t.Fatalf("create synthetic membership: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO clients (organization_id, name) VALUES ($1, 'Ingestion Client') RETURNING id`, organizationID).Scan(&clientID); err != nil {
+		t.Fatalf("create synthetic client: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO engagements (organization_id, client_id, name) VALUES ($1, $2, 'Ingestion Engagement') RETURNING id`, organizationID, clientID).Scan(&engagementID); err != nil {
+		t.Fatalf("create synthetic engagement: %v", err)
+	}
+
+	const insertIngestion = `INSERT INTO tool_ingestions (organization_id, engagement_id, tool, format_version, filename, sha256, byte_size, items_read, items_created, items_reused, items_ignored, items_rejected, imported_by)
+		VALUES ($1, $2, 'nmap', 'nmap 7.94 xmloutputversion 1.05', 'scan.xml', decode($3, 'hex'), 512, $4, $5, $6, $7, $8, $9) RETURNING id`
+	const firstDigest = "1111111111111111111111111111111111111111111111111111111111111111"
+	var ingestionID string
+	if err := connection.QueryRow(ctx, insertIngestion, organizationID, engagementID, firstDigest, 3, 2, 0, 1, 0, userID).Scan(&ingestionID); err != nil {
+		t.Fatalf("record synthetic ingestion: %v", err)
+	}
+
+	var databaseError *pgconn.PgError
+	_, err = connection.Exec(ctx, insertIngestion, organizationID, engagementID, firstDigest, 3, 2, 0, 1, 0, userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23505" {
+		t.Fatalf("replayed artifact error = %v, want PostgreSQL unique-violation 23505", err)
+	}
+	_, err = connection.Exec(ctx, insertIngestion, organizationID, engagementID,
+		"2222222222222222222222222222222222222222222222222222222222222222", 3, 2, 0, 0, 0, userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23514" {
+		t.Fatalf("incoherent summary error = %v, want PostgreSQL check-violation 23514", err)
+	}
+
+	if _, err := connection.Exec(ctx, `INSERT INTO assets (organization_id, engagement_id, name, source, ingestion_id) VALUES ($1, $2, 'api.example.test', 'ingest', $3)`, organizationID, engagementID, ingestionID); err != nil {
+		t.Fatalf("create synthetic ingested asset: %v", err)
+	}
+	_, err = connection.Exec(ctx, `INSERT INTO assets (organization_id, engagement_id, name) VALUES ($1, $2, 'api.example.test')`, organizationID, engagementID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23505" {
+		t.Fatalf("repeated asset name error = %v, want PostgreSQL unique-violation 23505", err)
+	}
+	for name, statement := range map[string]string{
+		"imported asset with no ingestion": `INSERT INTO assets (organization_id, engagement_id, name, source) VALUES ($1, $2, 'orphan.example.test', 'ingest')`,
+		"manual asset naming an ingestion": `INSERT INTO assets (organization_id, engagement_id, name, source, ingestion_id) VALUES ($1, $2, 'typed.example.test', 'manual', '` + ingestionID + `')`,
+	} {
+		_, err = connection.Exec(ctx, statement, organizationID, engagementID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "23514" {
+			t.Fatalf("%s error = %v, want PostgreSQL check-violation 23514", name, err)
+		}
+	}
+
+	for name, statement := range map[string]string{
+		"edited summary":    `UPDATE tool_ingestions SET items_created = 99 WHERE id = $1`,
+		"edited digest":     `UPDATE tool_ingestions SET sha256 = decode('3333333333333333333333333333333333333333333333333333333333333333', 'hex') WHERE id = $1`,
+		"deleted ingestion": `DELETE FROM tool_ingestions WHERE id = $1`,
+	} {
+		_, err = connection.Exec(ctx, statement, ingestionID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "P0001" {
+			t.Fatalf("%s error = %v, want PostgreSQL raise-exception P0001", name, err)
+		}
+	}
+}

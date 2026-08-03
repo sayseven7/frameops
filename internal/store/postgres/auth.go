@@ -32,6 +32,7 @@ var (
 	ErrForbidden     = errors.New("forbidden")
 	ErrNotFound      = errors.New("not found")
 	ErrInvalidState  = errors.New("invalid state")
+	ErrDuplicate     = errors.New("duplicate")
 )
 
 type Pool interface {
@@ -74,10 +75,15 @@ type Engagement struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// Asset carries where its name came from: an operator recorded it by hand, or
+// exactly one tool ingestion created it. Imported inventory and human
+// interpretation are never merged into one indistinguishable list.
 type Asset struct {
 	ID           string    `json:"id"`
 	EngagementID string    `json:"engagementId"`
 	Name         string    `json:"name"`
+	Source       string    `json:"source"`
+	IngestionID  *string   `json:"ingestionId"`
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
@@ -616,9 +622,12 @@ func CreateAsset(ctx context.Context, pool interface {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var asset Asset
-	err = tx.QueryRow(ctx, `INSERT INTO assets (organization_id, engagement_id, name) SELECT $1, id, $3 FROM engagements WHERE organization_id = $1 AND id = $2 RETURNING id, engagement_id, name, created_at`, session.OrganizationID, engagementID, name).Scan(&asset.ID, &asset.EngagementID, &asset.Name, &asset.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO assets (organization_id, engagement_id, name) SELECT $1, id, $3 FROM engagements WHERE organization_id = $1 AND id = $2 RETURNING `+assetColumns, session.OrganizationID, engagementID, name).Scan(scanAsset(&asset)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Asset{}, ErrNotFound
+	}
+	if duplicateAssetName(err) {
+		return Asset{}, ErrDuplicate
 	}
 	if err != nil {
 		return Asset{}, fmt.Errorf("insert asset: %w", err)
@@ -643,7 +652,7 @@ func ListAssets(ctx context.Context, pool interface {
 	if !exists {
 		return nil, ErrNotFound
 	}
-	rows, err := pool.Query(ctx, `SELECT id, engagement_id, name, created_at FROM assets WHERE organization_id = $1 AND engagement_id = $2 ORDER BY created_at, id`, session.OrganizationID, engagementID)
+	rows, err := pool.Query(ctx, `SELECT `+assetColumns+` FROM assets WHERE organization_id = $1 AND engagement_id = $2 ORDER BY created_at, id`, session.OrganizationID, engagementID)
 	if err != nil {
 		return nil, fmt.Errorf("list assets: %w", err)
 	}
@@ -718,24 +727,41 @@ func ReplaceFindingAssets(ctx context.Context, pool interface {
 func linkedAssets(ctx context.Context, queryer interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, session Session, findingID string) ([]Asset, error) {
-	rows, err := queryer.Query(ctx, `SELECT assets.id, assets.engagement_id, assets.name, assets.created_at FROM finding_assets JOIN assets ON assets.organization_id = finding_assets.organization_id AND assets.id = finding_assets.asset_id WHERE finding_assets.organization_id = $1 AND finding_assets.finding_id = $2 ORDER BY assets.created_at, assets.id`, session.OrganizationID, findingID)
+	rows, err := queryer.Query(ctx, `SELECT `+qualifiedAssetColumns+` FROM finding_assets JOIN assets ON assets.organization_id = finding_assets.organization_id AND assets.id = finding_assets.asset_id WHERE finding_assets.organization_id = $1 AND finding_assets.finding_id = $2 ORDER BY assets.created_at, assets.id`, session.OrganizationID, findingID)
 	if err != nil {
 		return nil, fmt.Errorf("list finding assets: %w", err)
 	}
 	return scanAssets(rows)
 }
 
+const (
+	assetColumns          = `id, engagement_id, name, source, ingestion_id, created_at`
+	qualifiedAssetColumns = `assets.id, assets.engagement_id, assets.name, assets.source, assets.ingestion_id, assets.created_at`
+)
+
 func scanAssets(rows pgx.Rows) ([]Asset, error) {
 	defer rows.Close()
 	var assets []Asset
 	for rows.Next() {
 		var asset Asset
-		if err := rows.Scan(&asset.ID, &asset.EngagementID, &asset.Name, &asset.CreatedAt); err != nil {
+		if err := rows.Scan(scanAsset(&asset)...); err != nil {
 			return nil, fmt.Errorf("scan asset: %w", err)
 		}
 		assets = append(assets, asset)
 	}
 	return assets, rows.Err()
+}
+
+func scanAsset(asset *Asset) []any {
+	return []any{&asset.ID, &asset.EngagementID, &asset.Name, &asset.Source, &asset.IngestionID, &asset.CreatedAt}
+}
+
+// duplicateAssetName recognizes only the per-engagement asset name index, so an
+// unrelated unique violation is never reported as a name an engagement already
+// carries.
+func duplicateAssetName(err error) bool {
+	var databaseError *pgconn.PgError
+	return errors.As(err, &databaseError) && databaseError.Code == "23505" && databaseError.ConstraintName == "assets_organization_id_engagement_id_name_key"
 }
 
 func ListFindings(ctx context.Context, pool interface {

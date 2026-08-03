@@ -65,6 +65,35 @@ go build -o "$PWD/bin/frameops-render" ./cmd/frameops-render
 export FRAMEOPS_PDF_WORKER="$PWD/bin/frameops-render"
 ```
 
+## Operator CLI
+
+`cmd/fops` is the operator CLI. Every command except the local first-admin
+bootstrap works through the HTTP API and has no database dependency at all; the
+`internal/e2e` check asserts that dependency boundary and drives the built binary
+against a running API.
+
+```bash
+go build -o "$PWD/bin/fops" ./cmd/fops
+bin/fops login --api https://frameops.example.test --email operator@example.test --password-file ./password
+bin/fops ingest nmap ./scan.xml --engagement "$ENGAGEMENT_ID"
+```
+
+`login` stores only the session the API issued, in a `0600` file inside a `0700`
+directory under `$FRAMEOPS_CONFIG_HOME`, `$XDG_CONFIG_HOME/frameops` or
+`~/.config/frameops`. The session cookie is `Secure`, so the CLI refuses an API
+address that is not `https://` unless it is loopback, where the local development
+server runs.
+
+`ingest nmap` uploads the artifact exactly as Nmap wrote it; the API parses it,
+applies the limits, and answers with the summary of what the import created,
+reused, ignored and rejected. Hosts become engagement assets marked
+`"source":"ingest"`, an already known host is reused rather than duplicated, and
+re-uploading the same artifact into the same engagement is refused as
+`duplicate_artifact`. The CLI is online-only: there is no local queue, and a
+failed upload is repeated. `docs/decisions/0003-ingestao-de-output-de-ferramenta.md`
+records the deduplication and identity defaults in force and what remains
+pending.
+
 ## Data handling
 
 `.env.example` contains placeholders only. Do not commit production credentials, tokens, passwords, customer information, or real evidence. Do not use client data or real evidence in the local environment, tests, fixtures, logs, or documentation examples.

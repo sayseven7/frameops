@@ -58,6 +58,8 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.findings(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/assets"):
 		server.assets(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/ingestions"):
+		server.ingestions(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/findings/") && strings.HasSuffix(request.URL.Path, "/assets"):
 		server.findingAssets(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/findings/") && strings.HasSuffix(request.URL.Path, "/triage"):
@@ -304,6 +306,12 @@ func (server Server) assets(response http.ResponseWriter, request *http.Request)
 		asset, err := postgres.CreateAsset(request.Context(), server.pool, session, engagementID, input.Name)
 		if errors.Is(err, postgres.ErrNotFound) {
 			writeError(response, http.StatusNotFound, "not_found")
+			return
+		}
+		// Inside one engagement an asset is identified by its name, so a repeated
+		// name is an explicit conflict rather than a second record of one host.
+		if errors.Is(err, postgres.ErrDuplicate) {
+			writeError(response, http.StatusConflict, "duplicate_asset")
 			return
 		}
 		if err != nil {
