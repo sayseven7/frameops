@@ -89,4 +89,11 @@ else
   status=1
 fi
 
+if golangci_output=$(golangci-lint --version 2>/dev/null); then
+  printf 'OK   %-14s %s\n' "golangci-lint" "$golangci_output"
+else
+  printf 'FAIL golangci-lint command not found. Install golangci-lint v2.9.0 built with Go 1.26.5.\n' >&2
+  status=1
+fi
+
 exit "$status"
