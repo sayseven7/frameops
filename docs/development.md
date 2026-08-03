@@ -23,19 +23,23 @@ Individual commands are available through `make fmt`, `make lint`, `make test`, 
 
 ## Local PostgreSQL
 
-Start only the development PostgreSQL service with:
+Start the development PostgreSQL and MinIO dependencies with:
 
 ```bash
-docker compose --env-file .env up -d postgres
+docker compose --env-file .env up -d postgres minio
 ```
 
-Stop the containers without deleting the named volume with:
+Stop the containers without deleting their named volumes with:
 
 ```bash
 docker compose --env-file .env down
 ```
 
-The Compose definition is restricted to PostgreSQL and binds its port to localhost. It does not provide migrations, application services, object storage, or product data.
+PostgreSQL is bound to localhost. Migrations and their integration tests are added by this stage. `make schema-test` always creates a disposable database; it must never be used against the persistent development database.
+
+## Local MinIO
+
+MinIO is only a local S3-compatible dependency in Stage 2: its API is bound to localhost, it does not provide a bucket, object-storage adapter, upload path, signed URL, or product data behavior. The MinIO console is intentionally not published.
 
 ## Data handling
 

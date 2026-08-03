@@ -21,8 +21,9 @@ run_case() {
   local node_output=$3
   local pnpm_output=$4
   local python_output=$5
-  local expected_exit=$6
-  local include_linter=${7:-true}
+  local docker_compose_output=$6
+  local expected_exit=$7
+  local include_linter=${8:-true}
 
   make_shim go "$go_output"
   make_shim node "$node_output"
@@ -36,7 +37,7 @@ run_case() {
   cat >"$tmpdir/docker" <<'EOF'
 #!/bin/bash
 if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then
-  printf '%s\n' 'Docker Compose version v5.3.1'
+  printf '%s\n' "$DOCKER_COMPOSE_OUTPUT"
   exit 0
 fi
 exit 1
@@ -44,7 +45,7 @@ EOF
   chmod +x "$tmpdir/docker"
 
   set +e
-  PATH="$tmpdir:/usr/bin:/bin" "$root/scripts/check-toolchains.sh" >/dev/null 2>&1
+  DOCKER_COMPOSE_OUTPUT="$docker_compose_output" PATH="$tmpdir:/usr/bin:/bin" "$root/scripts/check-toolchains.sh" >/dev/null 2>&1
   local actual_exit=$?
   set -e
 
@@ -55,11 +56,15 @@ EOF
   printf 'PASS: %s\n' "$description"
 }
 
-run_case "accepts approved floors" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" 0
-run_case "rejects old Go" "go version go1.25.9" "v22.12.0" "10.0.0" "Python 3.13.0" 1
-run_case "rejects old Node" "go version go1.26.5" "v22.11.9" "10.0.0" "Python 3.13.0" 1
-run_case "rejects pnpm outside major ten" "go version go1.26.5" "v22.12.0" "9.15.0" "Python 3.13.0" 1
-run_case "rejects old Python" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.12.9" 1
-run_case "rejects Go release candidate" "go version go1.26.5rc1" "v22.12.0" "10.0.0" "Python 3.13.0" 1
-run_case "rejects Python release candidate" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0rc1" 1
-run_case "rejects missing golangci-lint" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" 1 false
+run_case "accepts approved floors" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose version v2.20.0" 0
+run_case "rejects old Go" "go version go1.25.9" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose version v2.20.0" 1
+run_case "rejects old Node" "go version go1.26.5" "v22.11.9" "10.0.0" "Python 3.13.0" "Docker Compose version v2.20.0" 1
+run_case "rejects pnpm outside major ten" "go version go1.26.5" "v22.12.0" "9.15.0" "Python 3.13.0" "Docker Compose version v2.20.0" 1
+run_case "rejects old Python" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.12.9" "Docker Compose version v2.20.0" 1
+run_case "rejects old Docker Compose" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose version v2.19.9" 1
+run_case "rejects Docker Compose release candidate" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose version v2.20.0-rc1" 1
+run_case "rejects malformed Docker Compose output" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose v2.20.0" 1
+run_case "rejects Docker Compose output with tabs" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" $'Docker\tCompose version v2.20.0' 1
+run_case "rejects Go release candidate" "go version go1.26.5rc1" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose version v2.20.0" 1
+run_case "rejects Python release candidate" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0rc1" "Docker Compose version v2.20.0" 1
+run_case "rejects missing golangci-lint" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose version v2.20.0" 1 false
