@@ -414,6 +414,163 @@ func TestEvidenceKeepsImmutableCustodyOwnedByOneOrganization(t *testing.T) {
 	}
 }
 
+func TestMethodologyVersionsPublishOnceAndChecklistsCopyThemImmutably(t *testing.T) {
+	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("FRAMEOPS_DATABASE_URL is required for schema integration tests")
+	}
+
+	ctx := context.Background()
+	connection, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to schema test database: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := connection.Close(ctx); err != nil {
+			t.Errorf("close schema test database connection: %v", err)
+		}
+	})
+
+	var organizationID, otherOrganizationID, userID, clientID, engagementID, siblingID string
+	var templateID, draftID, publishedID, checklistID, itemID string
+	if err := connection.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Methodology Schema Organization') RETURNING id`).Scan(&organizationID); err != nil {
+		t.Fatalf("create synthetic organization: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Methodology Schema Outside Organization') RETURNING id`).Scan(&otherOrganizationID); err != nil {
+		t.Fatalf("create outside organization: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO users (display_name, email) VALUES ('Methodology Member', 'methodology-schema@example.test') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("create synthetic user: %v", err)
+	}
+	if _, err := connection.Exec(ctx, `INSERT INTO organization_memberships (organization_id, user_id, role) VALUES ($1, $2, 'admin')`, organizationID, userID); err != nil {
+		t.Fatalf("create synthetic membership: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO clients (organization_id, name) VALUES ($1, 'Methodology Client') RETURNING id`, organizationID).Scan(&clientID); err != nil {
+		t.Fatalf("create synthetic client: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO engagements (organization_id, client_id, name) VALUES ($1, $2, 'Methodology Engagement') RETURNING id`, organizationID, clientID).Scan(&engagementID); err != nil {
+		t.Fatalf("create synthetic engagement: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO engagements (organization_id, client_id, name) VALUES ($1, $2, 'Methodology Sibling Engagement') RETURNING id`, organizationID, clientID).Scan(&siblingID); err != nil {
+		t.Fatalf("create sibling engagement: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO methodology_templates (organization_id, created_by) VALUES ($1, $2) RETURNING id`, organizationID, userID).Scan(&templateID); err != nil {
+		t.Fatalf("create synthetic template: %v", err)
+	}
+
+	const insertVersion = `INSERT INTO methodology_template_versions (organization_id, template_id, version_number, name, source_name, source_version, attribution, created_by)
+		VALUES ($1, $2, $3, 'Web grey box', 'OWASP WSTG', '4.2', 'Original checklist structured after OWASP WSTG 4.2', $4) RETURNING id`
+	if err := connection.QueryRow(ctx, insertVersion, organizationID, templateID, 1, userID).Scan(&publishedID); err != nil {
+		t.Fatalf("create synthetic version: %v", err)
+	}
+	if err := connection.QueryRow(ctx, insertVersion, organizationID, templateID, 2, userID).Scan(&draftID); err != nil {
+		t.Fatalf("create second synthetic version: %v", err)
+	}
+
+	var databaseError *pgconn.PgError
+	_, err = connection.Exec(ctx, insertVersion, otherOrganizationID, templateID, 3, userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("cross-organization version error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+	_, err = connection.Exec(ctx, insertVersion, organizationID, templateID, 1, userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23505" {
+		t.Fatalf("duplicate version number error = %v, want PostgreSQL unique-violation 23505", err)
+	}
+	_, err = connection.Exec(ctx, `UPDATE methodology_template_versions SET state = 'published' WHERE id = $1`, publishedID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23514" {
+		t.Fatalf("publication without a publisher error = %v, want PostgreSQL check-violation 23514", err)
+	}
+
+	const insertItem = `INSERT INTO methodology_template_items (organization_id, version_id, position, title, objective, procedure, reference)
+		VALUES ($1, $2, $3, 'Session cookie attributes', 'Confirm the cookie cannot be read by scripts', 'Sign in and read Set-Cookie', 'WSTG-SESS-02') RETURNING id`
+	if err := connection.QueryRow(ctx, insertItem, organizationID, publishedID, 1).Scan(&itemID); err != nil {
+		t.Fatalf("create synthetic item: %v", err)
+	}
+	_, err = connection.Exec(ctx, insertItem, otherOrganizationID, publishedID, 2)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("cross-organization item error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+
+	// A checklist copies a published version, never a draft.
+	const insertChecklist = `INSERT INTO engagement_checklists (organization_id, engagement_id, template_version_id, version_number, name, source_name, source_version, attribution)
+		VALUES ($1, $2, $3, 1, 'Web grey box', 'OWASP WSTG', '4.2', 'Original checklist structured after OWASP WSTG 4.2') RETURNING id`
+	_, err = connection.Exec(ctx, insertChecklist, organizationID, engagementID, publishedID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("checklist of an unpublished version error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+
+	if _, err := connection.Exec(ctx, `UPDATE methodology_template_versions SET state = 'published', published_by = $2, published_at = now() WHERE id = $1`, publishedID, userID); err != nil {
+		t.Fatalf("publish synthetic version: %v", err)
+	}
+	for name, statement := range map[string]string{
+		"republished":  `UPDATE methodology_template_versions SET published_at = now() WHERE id = $1`,
+		"unpublished":  `UPDATE methodology_template_versions SET state = 'draft', published_by = NULL, published_at = NULL WHERE id = $1`,
+		"rewritten":    `UPDATE methodology_template_versions SET name = 'Rewritten' WHERE id = $1`,
+		"discarded":    `DELETE FROM methodology_template_versions WHERE id = $1`,
+		"renumbered":   `UPDATE methodology_template_versions SET version_number = 9 WHERE id = $1`,
+		"reattributed": `UPDATE methodology_template_versions SET attribution = 'Uncredited' WHERE id = $1`,
+	} {
+		_, err = connection.Exec(ctx, statement, publishedID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "P0001" {
+			t.Fatalf("%s published version error = %v, want PostgreSQL raise-exception P0001", name, err)
+		}
+	}
+	for name, statement := range map[string]string{
+		"edited item":  `UPDATE methodology_template_items SET title = 'Rewritten' WHERE id = $1`,
+		"removed item": `DELETE FROM methodology_template_items WHERE id = $1`,
+	} {
+		_, err = connection.Exec(ctx, statement, itemID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "P0001" {
+			t.Fatalf("%s of a published version error = %v, want PostgreSQL raise-exception P0001", name, err)
+		}
+	}
+	_, err = connection.Exec(ctx, insertItem, organizationID, publishedID, 2)
+	if !errors.As(err, &databaseError) || databaseError.Code != "P0001" {
+		t.Fatalf("added item of a published version error = %v, want PostgreSQL raise-exception P0001", err)
+	}
+	// The draft is still editable, which is what makes publication meaningful.
+	if _, err := connection.Exec(ctx, `UPDATE methodology_template_versions SET name = 'Still a draft' WHERE id = $1`, draftID); err != nil {
+		t.Fatalf("edit unpublished version: %v", err)
+	}
+
+	if err := connection.QueryRow(ctx, insertChecklist, organizationID, engagementID, publishedID).Scan(&checklistID); err != nil {
+		t.Fatalf("snapshot synthetic checklist: %v", err)
+	}
+	_, err = connection.Exec(ctx, insertChecklist, organizationID, engagementID, publishedID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23505" {
+		t.Fatalf("second checklist of one engagement error = %v, want PostgreSQL unique-violation 23505", err)
+	}
+	_, err = connection.Exec(ctx, insertChecklist, otherOrganizationID, siblingID, publishedID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("cross-organization checklist error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+
+	const copyItem = `INSERT INTO engagement_checklist_items (organization_id, checklist_id, position, title, objective, procedure)
+		VALUES ($1, $2, 1, 'Session cookie attributes', 'Confirm the cookie cannot be read by scripts', 'Sign in and read Set-Cookie') RETURNING id`
+	var copiedID string
+	if err := connection.QueryRow(ctx, copyItem, organizationID, checklistID).Scan(&copiedID); err != nil {
+		t.Fatalf("copy synthetic checklist item: %v", err)
+	}
+	for name, statement := range map[string]string{
+		"edited checklist":  `UPDATE engagement_checklists SET name = 'Rewritten' WHERE id = $1`,
+		"deleted checklist": `DELETE FROM engagement_checklists WHERE id = $1`,
+	} {
+		_, err = connection.Exec(ctx, statement, checklistID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "P0001" {
+			t.Fatalf("%s error = %v, want PostgreSQL raise-exception P0001", name, err)
+		}
+	}
+	for name, statement := range map[string]string{
+		"edited copy":  `UPDATE engagement_checklist_items SET title = 'Rewritten' WHERE id = $1`,
+		"deleted copy": `DELETE FROM engagement_checklist_items WHERE id = $1`,
+	} {
+		_, err = connection.Exec(ctx, statement, copiedID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "P0001" {
+			t.Fatalf("%s error = %v, want PostgreSQL raise-exception P0001", name, err)
+		}
+	}
+}
+
 func TestAuditEventsAreAppendOnlyAndActorsBelongToTheirOrganization(t *testing.T) {
 	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
 	if databaseURL == "" {

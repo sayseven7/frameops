@@ -38,6 +38,14 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.clients(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/clients/") && strings.HasSuffix(request.URL.Path, "/engagements"):
 		server.engagements(response, request)
+	case request.URL.Path == "/v1/methodology-templates":
+		server.methodologyTemplates(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/methodology-templates/") && strings.HasSuffix(request.URL.Path, "/draft"):
+		server.methodologyDraftContent(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/methodology-templates/") && strings.HasSuffix(request.URL.Path, "/publish"):
+		server.methodologyPublication(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/checklist"):
+		server.engagementChecklist(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/findings"):
 		server.findings(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/assets"):
@@ -170,14 +178,17 @@ func (server Server) engagements(response http.ResponseWriter, request *http.Req
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"items": items})
 	case http.MethodPost:
+		// The engagement may select one published methodology version, which it
+		// receives as its own immutable checklist copy.
 		var input struct {
-			Name string `json:"name"`
+			Name                 string `json:"name"`
+			MethodologyVersionID string `json:"methodologyVersionId"`
 		}
-		if !decodeJSON(request, &input) || strings.TrimSpace(input.Name) == "" {
+		if !decodeJSON(request, &input) || strings.TrimSpace(input.Name) == "" || !selectedID(input.MethodologyVersionID) {
 			writeError(response, http.StatusBadRequest, "invalid_request")
 			return
 		}
-		engagement, err := postgres.CreateEngagement(request.Context(), server.pool, session, clientID, input.Name)
+		engagement, err := postgres.CreateEngagement(request.Context(), server.pool, session, clientID, input.Name, input.MethodologyVersionID)
 		switch {
 		case errors.Is(err, postgres.ErrNotFound):
 			writeError(response, http.StatusNotFound, "not_found")
@@ -445,14 +456,22 @@ func supportedRetestResult(state string) bool {
 // database error, and it never reveals whether the identifier could exist.
 func pathID(path, prefix, suffix string) (string, bool) {
 	id := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
-	if strings.Contains(id, "/") {
-		return "", false
-	}
-	var parsed pgtype.UUID
-	if err := parsed.Scan(id); err != nil {
+	if strings.Contains(id, "/") || !identifier(id) {
 		return "", false
 	}
 	return id, true
+}
+
+// selectedID accepts one optional identifier a request body may carry, so an
+// identifier PostgreSQL could not read as a UUID is refused at the boundary
+// rather than reaching a query as a database error.
+func selectedID(id string) bool {
+	return id == "" || identifier(id)
+}
+
+func identifier(id string) bool {
+	var parsed pgtype.UUID
+	return parsed.Scan(id) == nil
 }
 
 func (server Server) session(response http.ResponseWriter, request *http.Request, requireCSRF bool) (postgres.Session, bool) {

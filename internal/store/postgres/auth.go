@@ -316,9 +316,13 @@ func ListClients(ctx context.Context, pool interface {
 	return clients, rows.Err()
 }
 
+// CreateEngagement opens one engagement and, when the caller selected a
+// published methodology version, copies it into the engagement's own immutable
+// checklist in the same transaction. An engagement is never created with a
+// checklist the selected version could not produce.
 func CreateEngagement(ctx context.Context, pool interface {
 	Begin(context.Context) (pgx.Tx, error)
-}, session Session, clientID, name string) (Engagement, error) {
+}, session Session, clientID, name, methodologyVersionID string) (Engagement, error) {
 	if session.Role != "admin" {
 		return Engagement{}, ErrForbidden
 	}
@@ -341,6 +345,11 @@ func CreateEngagement(ctx context.Context, pool interface {
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'engagement.created', 'engagement', $3, 'success', gen_random_uuid(), '{}'::jsonb)`, session.OrganizationID, session.UserID, engagement.ID); err != nil {
 		return Engagement{}, fmt.Errorf("audit engagement creation: %w", err)
+	}
+	if methodologyVersionID != "" {
+		if err := snapshotEngagementChecklist(ctx, tx, session, engagement.ID, methodologyVersionID); err != nil {
+			return Engagement{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Engagement{}, fmt.Errorf("commit engagement transaction: %w", err)
