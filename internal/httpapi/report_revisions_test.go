@@ -1,8 +1,13 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"sort"
@@ -30,7 +35,7 @@ func TestReportRevisionApprovalIsScopedAndConflicts(t *testing.T) {
 	cookie, csrf := signIn(t, ctx, server, pool, organizationID, "admin", "report-approval@example.test")
 	engagementID := reportEngagement(t, server, cookie, csrf, "Report Approval Engagement")
 	pendingID := createReportRevision(t, ctx, pool, organizationID, engagementID, false)
-	storedID := createReportRevision(t, ctx, pool, organizationID, engagementID, true)
+	storedID := uploadReportRevision(t, server, engagementID, cookie, csrf)
 
 	approvalPath := func(id string) string { return "/v1/report-revisions/" + url.PathEscape(id) + "/approve" }
 	for name, path := range map[string]string{
@@ -101,4 +106,40 @@ func createReportRevision(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 		t.Fatalf("create %s report revision: %v", state, err)
 	}
 	return revisionID
+}
+
+func uploadReportRevision(t *testing.T, handler http.Handler, engagementID string, cookie *http.Cookie, csrf string) string {
+	t.Helper()
+	file := validDOCX(t)
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "report.docx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/engagements/"+url.PathEscape(engagementID)+"/reports", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-CSRF-Token", csrf)
+	req.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("report upload status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+	var revision struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&revision); err != nil || revision.ID == "" {
+		t.Fatalf("decode uploaded report revision: %v", err)
+	}
+	return revision.ID
 }
