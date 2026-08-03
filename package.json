@@ -1,0 +1,11 @@
+{
+  "name": "frameops",
+  "private": true,
+  "packageManager": "pnpm@10.30.0",
+  "pnpm": {
+    "overrides": {
+      "postcss": "8.5.18",
+      "sharp": "0.35.0"
+    }
+  }
+}
