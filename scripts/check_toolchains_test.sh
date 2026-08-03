@@ -54,3 +54,5 @@ run_case "rejects old Go" "go version go1.25.9" "v22.12.0" "10.0.0" "Python 3.13
 run_case "rejects old Node" "go version go1.26.5" "v22.11.9" "10.0.0" "Python 3.13.0" 1
 run_case "rejects pnpm outside major ten" "go version go1.26.5" "v22.12.0" "9.15.0" "Python 3.13.0" 1
 run_case "rejects old Python" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.12.9" 1
+run_case "rejects Go release candidate" "go version go1.26.5rc1" "v22.12.0" "10.0.0" "Python 3.13.0" 1
+run_case "rejects Python release candidate" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0rc1" 1

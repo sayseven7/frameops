@@ -34,7 +34,7 @@ check_floor() {
 }
 
 if go_output=$(go version 2>/dev/null); then
-  if [[ $go_output =~ go([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+  if [[ $go_output =~ go([0-9]+\.[0-9]+\.[0-9]+)($|[[:space:]]) ]]; then
     check_floor "Go" "${BASH_REMATCH[1]}" "1.26.5" "Install Go 1.26.5 or newer."
   else
     printf 'FAIL Go             could not parse version from: %s\n' "$go_output" >&2
@@ -71,7 +71,7 @@ else
 fi
 
 if python_output=$(python3 --version 2>/dev/null); then
-  if [[ $python_output =~ Python\ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+  if [[ $python_output =~ ^Python\ ([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
     check_floor "Python" "${BASH_REMATCH[1]}" "3.13.0" "Install Python 3.13 or newer."
   else
     printf 'FAIL Python         could not parse version from: %s\n' "$python_output" >&2
