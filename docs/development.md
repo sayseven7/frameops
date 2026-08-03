@@ -39,7 +39,7 @@ PostgreSQL is bound to localhost. Migrations and their integration tests are add
 
 ## Local MinIO
 
-MinIO is only a local S3-compatible dependency in Stage 2: its API is bound to localhost, it does not provide a bucket, object-storage adapter, upload path, signed URL, or product data behavior. The MinIO console is intentionally not published.
+MinIO is the local S3-compatible object store for evidence bytes. Its API is bound to localhost and its console is intentionally not published. The API reads `FRAMEOPS_EVIDENCE_S3_ENDPOINT`, `FRAMEOPS_EVIDENCE_S3_BUCKET`, `FRAMEOPS_EVIDENCE_S3_REGION`, `FRAMEOPS_EVIDENCE_S3_ACCESS_KEY`, and `FRAMEOPS_EVIDENCE_S3_SECRET_KEY`, creates the bucket if it is absent, and refuses to start when object storage is unreachable: evidence capture has no degraded mode. The HTTP integration tests need the same variables and are skipped without them. A real deployment uses a dedicated key scoped to that bucket, never the object-storage root credential used locally. Signed download URLs do not exist yet; access is authorized by the server.
 
 ## Data handling
 

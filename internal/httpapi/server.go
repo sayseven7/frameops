@@ -11,17 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sayseven7/frameops/internal/domain"
+	"github.com/sayseven7/frameops/internal/store/objectstore"
 	"github.com/sayseven7/frameops/internal/store/postgres"
 )
 
 const sessionCookieName = "__Host-frameops_session"
 
 type Server struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	evidence objectstore.Bucket
 }
 
-func New(pool *pgxpool.Pool) http.Handler {
-	return Server{pool: pool}
+func New(pool *pgxpool.Pool, evidence objectstore.Bucket) http.Handler {
+	return Server{pool: pool, evidence: evidence}
 }
 
 func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Request) {
@@ -46,6 +48,8 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.triage(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/findings/") && strings.HasSuffix(request.URL.Path, "/retests"):
 		server.retests(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/findings/") && strings.HasSuffix(request.URL.Path, "/evidence"):
+		server.findingEvidence(response, request)
 	default:
 		writeError(response, http.StatusNotFound, "not_found")
 	}

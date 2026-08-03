@@ -19,7 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker compose --env-file .env.example up -d --wait postgres >/dev/null
+docker compose --env-file .env.example up -d --wait postgres minio >/dev/null
 
 docker compose --env-file .env.example exec -T postgres \
   psql -v ON_ERROR_STOP=1 -U "$FRAMEOPS_POSTGRES_USER" -d postgres \

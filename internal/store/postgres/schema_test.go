@@ -308,6 +308,112 @@ func TestFindingRetestsAreImmutableSequentialRoundsOwnedByOneOrganization(t *tes
 	}
 }
 
+func TestEvidenceKeepsImmutableCustodyOwnedByOneOrganization(t *testing.T) {
+	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("FRAMEOPS_DATABASE_URL is required for schema integration tests")
+	}
+
+	ctx := context.Background()
+	connection, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to schema test database: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := connection.Close(ctx); err != nil {
+			t.Errorf("close schema test database connection: %v", err)
+		}
+	})
+
+	var organizationID, otherOrganizationID, userID, clientID, engagementID, siblingID, findingID, evidenceID, storageKey string
+	if err := connection.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Evidence Schema Organization') RETURNING id`).Scan(&organizationID); err != nil {
+		t.Fatalf("create synthetic organization: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Evidence Schema Outside Organization') RETURNING id`).Scan(&otherOrganizationID); err != nil {
+		t.Fatalf("create outside organization: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO users (display_name, email) VALUES ('Evidence Member', 'evidence-member@example.test') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("create synthetic user: %v", err)
+	}
+	if _, err := connection.Exec(ctx, `INSERT INTO organization_memberships (organization_id, user_id, role) VALUES ($1, $2, 'member')`, organizationID, userID); err != nil {
+		t.Fatalf("create synthetic membership: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO clients (organization_id, name) VALUES ($1, 'Evidence Client') RETURNING id`, organizationID).Scan(&clientID); err != nil {
+		t.Fatalf("create synthetic client: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO engagements (organization_id, client_id, name) VALUES ($1, $2, 'Evidence Engagement') RETURNING id`, organizationID, clientID).Scan(&engagementID); err != nil {
+		t.Fatalf("create synthetic engagement: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO engagements (organization_id, client_id, name) VALUES ($1, $2, 'Evidence Sibling Engagement') RETURNING id`, organizationID, clientID).Scan(&siblingID); err != nil {
+		t.Fatalf("create sibling engagement: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO findings (organization_id, engagement_id, title, cvss_vector, cvss_score, created_by) VALUES ($1, $2, 'Evidence Finding', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', 9.8, $3) RETURNING id`, organizationID, engagementID, userID).Scan(&findingID); err != nil {
+		t.Fatalf("create synthetic finding: %v", err)
+	}
+
+	const captureEvidence = `INSERT INTO evidence (organization_id, engagement_id, finding_id, filename, declared_media_type, detected_media_type, sha256, byte_size, captured_by)
+		VALUES ($1, $2, $3, 'capture.png', 'text/plain', 'image/png', decode($4, 'hex'), $5, $6) RETURNING id, storage_key`
+	const digest = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+	const otherDigest = "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"
+	if err := connection.QueryRow(ctx, captureEvidence, organizationID, engagementID, findingID, digest, 23, userID).Scan(&evidenceID, &storageKey); err != nil {
+		t.Fatalf("reserve synthetic evidence: %v", err)
+	}
+	if want := "organizations/" + organizationID + "/engagements/" + engagementID + "/evidence/" + evidenceID; storageKey != want {
+		t.Fatalf("derived storage key = %q, want %q", storageKey, want)
+	}
+
+	var databaseError *pgconn.PgError
+	for name, statement := range map[string]string{
+		"truncated digest": `INSERT INTO evidence (organization_id, engagement_id, finding_id, filename, declared_media_type, detected_media_type, sha256, byte_size, captured_by) VALUES ($1, $2, $3, 'short.png', '', 'image/png', decode('9f86d0', 'hex'), 23, $4)`,
+		"empty capture":    `INSERT INTO evidence (organization_id, engagement_id, finding_id, filename, declared_media_type, detected_media_type, sha256, byte_size, captured_by) VALUES ($1, $2, $3, 'empty.png', '', 'image/png', decode('` + digest + `', 'hex'), 0, $4)`,
+		"undetected type":  `INSERT INTO evidence (organization_id, engagement_id, finding_id, filename, declared_media_type, detected_media_type, sha256, byte_size, captured_by) VALUES ($1, $2, $3, 'unknown.png', '', '  ', decode('` + digest + `', 'hex'), 23, $4)`,
+		"stored without instant": `INSERT INTO evidence (organization_id, engagement_id, finding_id, filename, declared_media_type, detected_media_type, sha256, byte_size, state, captured_by)
+			VALUES ($1, $2, $3, 'unconfirmed.png', '', 'image/png', decode('` + digest + `', 'hex'), 23, 'stored', $4)`,
+	} {
+		_, err = connection.Exec(ctx, statement, organizationID, engagementID, findingID, userID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "23514" {
+			t.Fatalf("%s error = %v, want PostgreSQL check-violation 23514", name, err)
+		}
+	}
+
+	_, err = connection.Exec(ctx, captureEvidence, organizationID, siblingID, findingID, digest, 23, userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("relabelled-engagement capture error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+	_, err = connection.Exec(ctx, captureEvidence, otherOrganizationID, engagementID, findingID, digest, 23, userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("cross-organization capture error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+
+	// Evidence never cascades with its finding.
+	_, err = connection.Exec(ctx, `DELETE FROM findings WHERE id = $1`, findingID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23001" {
+		t.Fatalf("delete finding with evidence error = %v, want PostgreSQL restrict-violation 23001", err)
+	}
+
+	for name, statement := range map[string]string{
+		"rewritten digest":  `UPDATE evidence SET sha256 = decode('` + otherDigest + `', 'hex'), state = 'stored', stored_at = now() WHERE id = $1`,
+		"rewritten name":    `UPDATE evidence SET filename = 'renamed.png', state = 'stored', stored_at = now() WHERE id = $1`,
+		"rewritten size":    `UPDATE evidence SET byte_size = 1, state = 'stored', stored_at = now() WHERE id = $1`,
+		"reserved again":    `UPDATE evidence SET state = 'pending' WHERE id = $1`,
+		"discarded capture": `DELETE FROM evidence WHERE id = $1`,
+	} {
+		_, err = connection.Exec(ctx, statement, evidenceID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "P0001" {
+			t.Fatalf("%s error = %v, want PostgreSQL raise-exception P0001", name, err)
+		}
+	}
+
+	// Confirming the upload is the one state change the schema accepts.
+	if _, err := connection.Exec(ctx, `UPDATE evidence SET state = 'stored', stored_at = now() WHERE id = $1`, evidenceID); err != nil {
+		t.Fatalf("confirm stored evidence: %v", err)
+	}
+	_, err = connection.Exec(ctx, `UPDATE evidence SET state = 'stored', stored_at = now() WHERE id = $1`, evidenceID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "P0001" {
+		t.Fatalf("reconfirmed evidence error = %v, want PostgreSQL raise-exception P0001", err)
+	}
+}
+
 func TestAuditEventsAreAppendOnlyAndActorsBelongToTheirOrganization(t *testing.T) {
 	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
 	if databaseURL == "" {
