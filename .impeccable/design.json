@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-03T19:13:48.699Z",
+  "title": "Design System: FrameOPS",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Electric Scope", "canonical": "#85f266", "tonalRamp": ["#061417", "#17382d", "#1e4031", "#85f266", "#b6fa9f"] },
+      "secondary": { "role": "secondary", "displayName": "Evidence Cyan", "canonical": "#62d8de", "tonalRamp": ["#092126", "#0d292f", "#3c7674", "#62d8de", "#c3fbfa"] },
+      "tertiary": { "role": "tertiary", "displayName": "Review Orange", "canonical": "#ff7043", "tonalRamp": ["#201b1b", "#75412f", "#b95235", "#ff7043", "#ffd5c7"] }
+    },
+    "breakpoints": [{ "name": "compact", "value": "900px" }, { "name": "mobile", "value": "620px" }],
+    "shadows": [{ "name": "attack-surface", "value": "0 24px 56px rgba(0,0,0,.24)", "purpose": "Lift only the central operational workbench." }]
+  },
+  "components": [
+    { "name": "Operational Navigation", "kind": "nav", "refersTo": "navigation-active", "description": "A 44px target for moving among operational records.", "html": "<a class=\"ds-nav\" href=\"#\">01 Portfolio</a>", "css": ".ds-nav{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:8px;background:#0d252b;box-shadow:inset 2px 0 #85f266;color:#f2f7f3;font:700 14px Aptos,Segoe UI,sans-serif;text-decoration:none}.ds-nav:hover{background:#102b30}.ds-nav:focus-visible{outline:3px solid #ffe16b;outline-offset:3px}" },
+    { "name": "Evidence Status", "kind": "custom", "refersTo": "report-status", "description": "A concise synthetic evidence state with text beyond color.", "html": "<span class=\"ds-status\">SINTÉTICA</span>", "css": ".ds-status{display:inline-block;border:1px solid #39646a;padding:5px 7px;color:#62d8de;font:700 10px ui-monospace,monospace;letter-spacing:.06em}.ds-status:focus-visible{outline:3px solid #ffe16b;outline-offset:3px}" }
+  ],
+  "narrative": {
+    "northStar": "FrameSeven Ops Deck",
+    "keyCharacteristics": ["Near-black petro-teal operational density", "Electric-green scope signal", "Attack surface and evidence as the central artifact"],
+    "dos": ["Do make synthetic/demo status explicit.", "Do pair semantic color with text or glyphs."],
+    "donts": ["Don't imply backend activity in a preview.", "Don't replace the attack-surface mechanism with generic metrics."]
+  }
+}

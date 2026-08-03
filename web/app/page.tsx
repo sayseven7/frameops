@@ -1,116 +1,123 @@
-const sections = [
-  {
-    id: "portfolio",
-    label: "Portfólio",
-    eyebrow: "Visão de trabalho",
-    title: "Engajamentos em acompanhamento",
-    description:
-      "A demonstração organiza o trabalho por cliente e engajamento, sem afirmar atividade ou dados operacionais reais.",
-    items: ["Cliente demonstrativo: Atlas", "Engajamento: Revisão web", "Escopo ilustrativo: aplicações públicas"],
-  },
-  {
-    id: "engagement",
-    label: "Engajamento",
-    eyebrow: "Contexto",
-    title: "Revisão web — exemplo estático",
-    description:
-      "Um local único para consolidar escopo, ativos autorizados e regras de engajamento quando os contratos de domínio existirem.",
-    items: ["Janela: informação demonstrativa", "Ativo: portal.exemplo.test", "Regra: somente o escopo autorizado"],
-  },
-  {
-    id: "checklist",
-    label: "Checklist",
-    eyebrow: "Metodologia",
-    title: "Cobertura orientada por procedimento",
-    description:
-      "Itens de metodologia ajudam a registrar o que foi verificado, a evidência esperada e a justificativa quando necessário.",
-    items: ["Autenticação — procedimento de exemplo", "Entrada de dados — procedimento de exemplo", "Sessão — procedimento de exemplo"],
-  },
-  {
-    id: "findings",
-    label: "Findings",
-    eyebrow: "Registro estruturado",
-    title: "Finding demonstrativo",
-    description:
-      "A classificação abaixo é apenas uma amostra visual; não representa uma vulnerabilidade, avaliação ou estado real.",
-    items: ["Severidade: Alta — exemplo", "Validação: precisa de revisão — exemplo", "Remediação: não exibida neste preview"],
-  },
-  {
-    id: "evidence",
-    label: "Evidências",
-    eyebrow: "Cadeia de custódia",
-    title: "Referência de evidência sintética",
-    description:
-      "No produto, cada evidência será vinculada a origem, hash e histórico. Este preview não contém arquivos, uploads ou dados reais.",
-    items: ["Tipo: captura ilustrativa", "Origem: não conectada", "Integridade: indisponível neste preview"],
-  },
-  {
-    id: "retest",
-    label: "Retest",
-    eyebrow: "Histórico",
-    title: "Rodada de retest — exemplo",
-    description:
-      "Retests futuros preservarão rodadas e resultados observados. Nenhum resultado é calculado ou armazenado nesta página.",
-    items: ["Rodada: exemplo não persistente", "Procedimento: demonstrativo", "Resultado: não avaliado"],
-  },
-  {
-    id: "reports",
-    label: "Relatórios",
-    eyebrow: "Entrega",
-    title: "Rastreabilidade de relatório",
-    description:
-      "O fluxo planejado mantém revisões DOCX e PDF derivado. Geração, aprovação e arquivos permanecem fora deste preview.",
-    items: ["DOCX: não gerado", "Revisão: não disponível", "PDF: não disponível"],
-  },
-];
+const navigation = [
+  ["portfolio", "Portfólio"],
+  ["engagement", "Engajamento"],
+  ["checklist", "Checklist"],
+  ["findings", "Findings"],
+  ["evidence", "Evidências"],
+  ["retest", "Retest"],
+  ["reports", "Relatórios"],
+] as const;
+
+const activity = [
+  ["11:42", "Evidência vinculada", "Captura ilustrativa · origem não conectada"],
+  ["10:18", "Finding em revisão", "Alta · demonstração sem avaliação real"],
+  ["09:05", "Checklist atualizado", "Sessão · item demonstrativo"],
+] as const;
 
 export default function HomePage() {
   return (
     <div className="app-shell">
-      <header className="site-header">
-        <a className="brand" href="#portfolio">
-          FrameOPS <span>preview</span>
+      <header className="topbar">
+        <a className="brand" href="#portfolio" aria-label="FrameOPS, ir para o portfólio">
+          <span className="brand-mark" aria-hidden="true">F7</span>
+          <span>FRAMEOPS</span>
         </a>
-        <p className="preview-notice" role="status">
-          Preview técnico — dados sintéticos; sem API, autenticação, persistência ou dados reais.
+        <p className="demo-notice" role="status">
+          <span aria-hidden="true">●</span> DEMO ESTÁTICA · dados sintéticos · sem API, autenticação, persistência ou dados reais
         </p>
+        <a className="command-link" href="#reports">Ver entrega <span aria-hidden="true">↗</span></a>
       </header>
 
       <div className="workspace">
-        <aside className="sidebar" aria-label="Navegação do preview">
-          <nav aria-label="Áreas do preview">
-            <p className="nav-label">Navegação</p>
+        <aside className="sidebar" aria-label="Navegação operacional">
+          <div className="operator">
+            <span className="operator-dot" aria-hidden="true" />
+            <div><strong>ATLAS / DEMO</strong><small>Revisão web · local</small></div>
+          </div>
+          <nav>
+            <p className="nav-title">Operação</p>
             <ul>
-              {sections.map(({ id, label }) => (
+              {navigation.map(([id, label], index) => (
                 <li key={id}>
-                  <a href={`#${id}`}>{label}</a>
+                  <a className={index === 0 ? "active" : ""} href={`#${id}`}>
+                    <span className="nav-index">0{index + 1}</span>{label}
+                  </a>
                 </li>
               ))}
             </ul>
           </nav>
+          <div className="sidebar-footer">
+            <span>AMBIENTE</span>
+            <strong>LOCAL / ILUSTRATIVO</strong>
+          </div>
         </aside>
 
-        <main className="content" id="conteudo">
-          <section className="intro" aria-labelledby="preview-title">
-            <p className="eyebrow">Ambiente de demonstração</p>
-            <h1 id="preview-title">Planejamento e consolidação, sem fingir operação.</h1>
-            <p>
-              Esta página mostra a estrutura planejada do FrameOPS. Ela é local, estática e intencionalmente desconectada do produto funcional.
-            </p>
+        <main className="content">
+          <section className="command-deck" id="portfolio" aria-labelledby="deck-title">
+            <div className="deck-heading">
+              <div>
+                <p className="route">PORTFÓLIO / ATLAS / REVISÃO WEB</p>
+                <h1 id="deck-title">Superfície de ataque e evidência.</h1>
+                <p>Um workspace demonstrativo para registrar o trabalho que, no produto, passará de descoberta a relatório rastreável.</p>
+              </div>
+              <div className="engagement-state" aria-label="Estado do engajamento: demonstração em revisão">
+                <span>EM REVISÃO</span>
+                <strong>DEMO</strong>
+              </div>
+            </div>
+
+            <div className="attack-surface" aria-label="Mapa demonstrativo da superfície de ataque">
+              <div className="surface-header"><span>SUPERFÍCIE AUTORIZADA</span><span>3 ALVOS ILUSTRATIVOS</span></div>
+              <div className="surface-map">
+                <div className="surface-node primary"><span>portal.exemplo.test</span><small>WEB / EXEMPLO</small></div>
+                <div className="surface-node"><span>api.exemplo.test</span><small>API / EXEMPLO</small></div>
+                <div className="surface-node"><span>admin.exemplo.test</span><small>PAINEL / EXEMPLO</small></div>
+                <i className="trace trace-one" aria-hidden="true" /><i className="trace trace-two" aria-hidden="true" />
+              </div>
+              <div className="surface-legend"><span><b className="legend-safe" /> Escopo ilustrativo</span><span><b className="legend-review" /> Revisão necessária</span><span>SEM CONEXÃO</span></div>
+            </div>
           </section>
 
-          {sections.map(({ id, eyebrow, title, description, items }) => (
-            <section className="preview-section" id={id} key={id} aria-labelledby={`${id}-title`}>
-              <p className="eyebrow">{eyebrow}</p>
-              <h2 id={`${id}-title`}>{title}</h2>
-              <p>{description}</p>
-              <ul className="detail-list">
-                {items.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </section>
-          ))}
+          <section className="operations-grid" aria-label="Resumo operacional demonstrativo">
+            <article className="operation-panel" id="engagement">
+              <header><span>ENGAJAMENTO</span><a href="#checklist">Abrir escopo <span aria-hidden="true">→</span></a></header>
+              <h2>Revisão web</h2>
+              <dl className="compact-list"><div><dt>Cliente</dt><dd>Atlas <em>DEMO</em></dd></div><div><dt>Janela</dt><dd>Informação ilustrativa</dd></div><div><dt>Regra</dt><dd>Somente escopo autorizado</dd></div></dl>
+            </article>
+
+            <article className="operation-panel checklist-panel" id="checklist">
+              <header><span>CHECKLIST</span><a href="#findings">Metodologia <span aria-hidden="true">→</span></a></header>
+              <h2>Cobertura de procedimento</h2>
+              <ul className="checklist"><li><span aria-hidden="true">✓</span> Autenticação <small>exemplo</small></li><li><span aria-hidden="true">✓</span> Entrada de dados <small>exemplo</small></li><li><span aria-hidden="true">○</span> Sessão <small>aguarda revisão</small></li></ul>
+            </article>
+
+            <article className="findings-panel" id="findings">
+              <div><span className="panel-label">FINDING / 01</span><span className="severity"><b aria-hidden="true">!</b> ALTA · EXEMPLO</span></div>
+              <h2>Registro demonstrativo, não avaliação.</h2>
+              <p>O estado pede revisão humana e não descreve uma vulnerabilidade real.</p>
+              <a href="#evidence">Examinar evidência vinculada <span aria-hidden="true">→</span></a>
+            </article>
+
+            <article className="evidence-panel" id="evidence">
+              <header><span>EVIDÊNCIAS</span><span>0 ARQUIVOS REAIS</span></header>
+              <div className="evidence-sheet">
+                <div className="evidence-code" aria-hidden="true"><span /><span /><span /><span /><span /></div>
+                <div><strong>captura-ilustrativa.txt</strong><p>Origem não conectada · hash indisponível no preview</p></div>
+                <span className="evidence-tag">SINTÉTICA</span>
+              </div>
+            </article>
+
+            <article className="activity-panel" id="retest">
+              <header><span>RETEST / LINHA DE TEMPO</span><span>NÃO PERSISTENTE</span></header>
+              <ol>{activity.map(([time, title, detail]) => <li key={time}><time>{time}</time><div><strong>{title}</strong><small>{detail}</small></div></li>)}</ol>
+            </article>
+
+            <article className="reports-panel" id="reports">
+              <span className="panel-label">RELATÓRIOS</span><h2>Entrega só existe após aprovação.</h2>
+              <p>DOCX e PDF continuam indisponíveis neste preview estático.</p>
+              <div><span>DOCX</span><strong>NÃO GERADO</strong><span>PDF</span><strong>NÃO DISPONÍVEL</strong></div>
+            </article>
+          </section>
         </main>
       </div>
     </div>
