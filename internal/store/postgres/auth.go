@@ -73,6 +73,21 @@ type Engagement struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type Finding struct {
+	ID               string    `json:"id"`
+	EngagementID     string    `json:"engagementId"`
+	Title            string    `json:"title"`
+	Description      string    `json:"description"`
+	Impact           string    `json:"impact"`
+	Remediation      string    `json:"remediation"`
+	Reproduction     string    `json:"reproduction"`
+	CVSSVector       string    `json:"cvssVector"`
+	CVSSScore        float64   `json:"cvssScore"`
+	ValidationState  string    `json:"validationState"`
+	RemediationState *string   `json:"remediationState"`
+	CreatedAt        time.Time `json:"createdAt"`
+}
+
 // BootstrapFirstAdmin consumes the local one-time credential only after its database transaction commits.
 func BootstrapFirstAdmin(ctx context.Context, pool interface {
 	Begin(context.Context) (pgx.Tx, error)
@@ -408,4 +423,59 @@ func randomBytes(length int) ([]byte, error) {
 func tokenHash(token string) []byte {
 	hash := sha256.Sum256([]byte(token))
 	return hash[:]
+}
+
+func CreateFinding(ctx context.Context, pool interface {
+	Begin(context.Context) (pgx.Tx, error)
+}, session Session, engagementID string, finding Finding) (Finding, error) {
+	finding.Title = strings.TrimSpace(finding.Title)
+	if finding.Title == "" {
+		return Finding{}, errors.New("finding title is required")
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Finding{}, fmt.Errorf("begin finding transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	err = tx.QueryRow(ctx, `INSERT INTO findings (organization_id, engagement_id, title, description, impact, remediation, reproduction, cvss_vector, cvss_score, created_by) SELECT $1, id, $3, $4, $5, $6, $7, $8, $9, $10 FROM engagements WHERE organization_id = $1 AND id = $2 RETURNING id, engagement_id, title, description, impact, remediation, reproduction, cvss_vector, cvss_score, validation_state, remediation_state, created_at`, session.OrganizationID, engagementID, finding.Title, finding.Description, finding.Impact, finding.Remediation, finding.Reproduction, finding.CVSSVector, finding.CVSSScore, session.UserID).Scan(&finding.ID, &finding.EngagementID, &finding.Title, &finding.Description, &finding.Impact, &finding.Remediation, &finding.Reproduction, &finding.CVSSVector, &finding.CVSSScore, &finding.ValidationState, &finding.RemediationState, &finding.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Finding{}, ErrNotFound
+	}
+	if err != nil {
+		return Finding{}, fmt.Errorf("insert finding: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'finding.created', 'finding', $3, 'success', gen_random_uuid(), '{}'::jsonb)`, session.OrganizationID, session.UserID, finding.ID); err != nil {
+		return Finding{}, fmt.Errorf("audit finding creation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Finding{}, fmt.Errorf("commit finding transaction: %w", err)
+	}
+	return finding, nil
+}
+
+func ListFindings(ctx context.Context, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, session Session, engagementID string) ([]Finding, error) {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM engagements WHERE organization_id = $1 AND id = $2)`, session.OrganizationID, engagementID).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("find engagement: %w", err)
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	rows, err := pool.Query(ctx, `SELECT id, engagement_id, title, description, impact, remediation, reproduction, cvss_vector, cvss_score, validation_state, remediation_state, created_at FROM findings WHERE organization_id = $1 AND engagement_id = $2 ORDER BY created_at, id`, session.OrganizationID, engagementID)
+	if err != nil {
+		return nil, fmt.Errorf("list findings: %w", err)
+	}
+	defer rows.Close()
+	var findings []Finding
+	for rows.Next() {
+		var finding Finding
+		if err := rows.Scan(&finding.ID, &finding.EngagementID, &finding.Title, &finding.Description, &finding.Impact, &finding.Remediation, &finding.Reproduction, &finding.CVSSVector, &finding.CVSSScore, &finding.ValidationState, &finding.RemediationState, &finding.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan finding: %w", err)
+		}
+		findings = append(findings, finding)
+	}
+	return findings, rows.Err()
 }

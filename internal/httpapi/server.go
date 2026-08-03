@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sayseven7/frameops/internal/domain"
 	"github.com/sayseven7/frameops/internal/store/postgres"
 )
 
@@ -34,6 +35,8 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.clients(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/clients/") && strings.HasSuffix(request.URL.Path, "/engagements"):
 		server.engagements(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/findings"):
+		server.findings(response, request)
 	default:
 		writeError(response, http.StatusNotFound, "not_found")
 	}
@@ -172,6 +175,61 @@ func (server Server) engagements(response http.ResponseWriter, request *http.Req
 		default:
 			writeJSON(response, http.StatusCreated, engagement)
 		}
+	default:
+		writeError(response, http.StatusNotFound, "not_found")
+	}
+}
+
+func (server Server) findings(response http.ResponseWriter, request *http.Request) {
+	engagementID := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/engagements/"), "/findings")
+	if engagementID == "" || strings.Contains(engagementID, "/") {
+		writeError(response, http.StatusNotFound, "not_found")
+		return
+	}
+	session, ok := server.session(response, request, request.Method == http.MethodPost)
+	if !ok {
+		return
+	}
+	switch request.Method {
+	case http.MethodGet:
+		items, err := postgres.ListFindings(request.Context(), server.pool, session, engagementID)
+		if errors.Is(err, postgres.ErrNotFound) {
+			writeError(response, http.StatusNotFound, "not_found")
+			return
+		}
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"items": items})
+	case http.MethodPost:
+		var input struct {
+			Title        string `json:"title"`
+			Description  string `json:"description"`
+			Impact       string `json:"impact"`
+			Remediation  string `json:"remediation"`
+			Reproduction string `json:"reproduction"`
+			CVSSVector   string `json:"cvssVector"`
+		}
+		if !decodeJSON(request, &input) || strings.TrimSpace(input.Title) == "" {
+			writeError(response, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		cvss, err := domain.ParseCVSS31(input.CVSSVector)
+		if err != nil {
+			writeError(response, http.StatusBadRequest, "invalid_cvss_vector")
+			return
+		}
+		finding, err := postgres.CreateFinding(request.Context(), server.pool, session, engagementID, postgres.Finding{Title: input.Title, Description: input.Description, Impact: input.Impact, Remediation: input.Remediation, Reproduction: input.Reproduction, CVSSVector: cvss.Vector, CVSSScore: cvss.Score})
+		if errors.Is(err, postgres.ErrNotFound) {
+			writeError(response, http.StatusNotFound, "not_found")
+			return
+		}
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		writeJSON(response, http.StatusCreated, finding)
 	default:
 		writeError(response, http.StatusNotFound, "not_found")
 	}

@@ -85,6 +85,29 @@ func TestAuthenticatedOrganizationPortfolio(t *testing.T) {
 	if engagement.Code != http.StatusCreated {
 		t.Fatalf("create engagement status = %d, want %d: %s", engagement.Code, http.StatusCreated, engagement.Body.String())
 	}
+	var engagementBody struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(engagement.Body).Decode(&engagementBody); err != nil || engagementBody.ID == "" {
+		t.Fatalf("decode engagement = %v, body=%s", err, engagement.Body.String())
+	}
+
+	invalidFinding := request(t, server, http.MethodPost, "/v1/engagements/"+url.PathEscape(engagementBody.ID)+"/findings", `{"title":"SQL injection","cvssVector":"CVSS:4.0/invalid"}`, cookie, csrfBody.Token)
+	if invalidFinding.Code != http.StatusBadRequest {
+		t.Fatalf("invalid finding status = %d, want %d", invalidFinding.Code, http.StatusBadRequest)
+	}
+	finding := request(t, server, http.MethodPost, "/v1/engagements/"+url.PathEscape(engagementBody.ID)+"/findings", `{"title":"SQL injection","description":"Injection in login","impact":"Account access","remediation":"Parameterize query","reproduction":"Submit crafted username","cvssVector":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}`, cookie, csrfBody.Token)
+	if finding.Code != http.StatusCreated || !strings.Contains(finding.Body.String(), `"cvssScore":9.8`) {
+		t.Fatalf("create finding status = %d, body=%s", finding.Code, finding.Body.String())
+	}
+	findings := request(t, server, http.MethodGet, "/v1/engagements/"+url.PathEscape(engagementBody.ID)+"/findings", "", cookie, "")
+	if findings.Code != http.StatusOK || !strings.Contains(findings.Body.String(), "SQL injection") {
+		t.Fatalf("list findings status = %d, body=%s", findings.Code, findings.Body.String())
+	}
+	missingEngagement := request(t, server, http.MethodGet, "/v1/engagements/00000000-0000-0000-0000-000000000000/findings", "", cookie, "")
+	if missingEngagement.Code != http.StatusNotFound {
+		t.Fatalf("missing engagement status = %d, want %d", missingEngagement.Code, http.StatusNotFound)
+	}
 
 	logout := request(t, server, http.MethodPost, "/v1/session/logout", "", cookie, csrfBody.Token)
 	if logout.Code != http.StatusNoContent {
@@ -99,6 +122,9 @@ func TestAuthenticatedOrganizationPortfolio(t *testing.T) {
 	}
 	if count := auditCount(t, ctx, pool, admin.OrganizationID, "engagement.created"); count != 1 {
 		t.Fatalf("engagement audit events = %d, want 1", count)
+	}
+	if count := auditCount(t, ctx, pool, admin.OrganizationID, "finding.created"); count != 1 {
+		t.Fatalf("finding audit events = %d, want 1", count)
 	}
 }
 
