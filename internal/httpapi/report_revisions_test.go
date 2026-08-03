@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sayseven7/frameops/internal/render"
 )
 
 func TestReportRevisionApprovalIsScopedAndConflicts(t *testing.T) {
@@ -30,7 +31,7 @@ func TestReportRevisionApprovalIsScopedAndConflicts(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	server := New(pool, evidenceBucket(t))
+	server := New(pool, evidenceBucket(t), render.Worker{})
 	organizationID := createOrganization(t, ctx, pool, "Report Approval Organization")
 	cookie, csrf := signIn(t, ctx, server, pool, organizationID, "admin", "report-approval@example.test")
 	engagementID := reportEngagement(t, server, cookie, csrf, "Report Approval Engagement")

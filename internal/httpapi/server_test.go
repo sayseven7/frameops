@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sayseven7/frameops/internal/render"
 	"github.com/sayseven7/frameops/internal/store/postgres"
 )
 
@@ -44,7 +45,7 @@ func TestAuthenticatedOrganizationPortfolio(t *testing.T) {
 	if _, err := os.Stat(tokenFile); !os.IsNotExist(err) {
 		t.Fatalf("bootstrap token file = %v, want removed", err)
 	}
-	server := New(pool, evidenceBucket(t))
+	server := New(pool, evidenceBucket(t), render.Worker{})
 	login := request(t, server, http.MethodPost, "/v1/session/login", `{"email":"admin@example.test","password":"correct horse battery staple"}`, nil, "")
 	if login.Code != http.StatusNoContent {
 		t.Fatalf("login status = %d, want %d: %s", login.Code, http.StatusNoContent, login.Body.String())

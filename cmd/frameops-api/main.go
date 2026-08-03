@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sayseven7/frameops/internal/httpapi"
+	"github.com/sayseven7/frameops/internal/render"
 	"github.com/sayseven7/frameops/internal/store/objectstore"
 )
 
@@ -18,6 +19,11 @@ func main() {
 		os.Exit(1)
 	}
 	evidence, err := objectstore.FromEnv()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	renderer, err := render.FromEnv()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -36,7 +42,7 @@ func main() {
 	if address == "" {
 		address = "127.0.0.1:8080"
 	}
-	if err := http.ListenAndServe(address, httpapi.New(pool, evidence)); err != nil {
+	if err := http.ListenAndServe(address, httpapi.New(pool, evidence, renderer)); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

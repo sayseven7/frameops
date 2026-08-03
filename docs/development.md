@@ -41,6 +41,30 @@ PostgreSQL is bound to localhost. Migrations and their integration tests are add
 
 MinIO is the local S3-compatible object store for evidence bytes. Its API is bound to localhost and its console is intentionally not published. The API reads `FRAMEOPS_EVIDENCE_S3_ENDPOINT`, `FRAMEOPS_EVIDENCE_S3_BUCKET`, `FRAMEOPS_EVIDENCE_S3_REGION`, `FRAMEOPS_EVIDENCE_S3_ACCESS_KEY`, and `FRAMEOPS_EVIDENCE_S3_SECRET_KEY`, creates the bucket if it is absent, and refuses to start when object storage is unreachable: evidence capture has no degraded mode. The HTTP integration tests need the same variables and are skipped without them. A real deployment uses a dedicated key scoped to that bucket, never the object-storage root credential used locally. Signed download URLs do not exist yet; access is authorized by the server.
 
+## Isolated document worker
+
+`cmd/frameops-render` is the only component that runs a document converter. The
+API locates it through `FRAMEOPS_PDF_WORKER`, the absolute path of the built
+worker executable, and refuses to start without it: a PDF is only ever the
+conversion of an approved DOCX revision, so there is no degraded delivery mode.
+
+The worker converts one file to one file. It inherits no environment, refuses to
+start when it can see any variable outside `PATH`, `HOME`, `TMPDIR`, `LANG`,
+`LC_ALL` and `TZ`, and runs LibreOffice headless inside an empty network
+namespace (`unshare --net --map-root-user`). Local development therefore needs
+`soffice` and `unshare` available; the conversion tests are skipped without them.
+`POST /v1/report-revisions/{id}/pdf` answers `conversion_failed` when the worker
+cannot convert, and no approved revision is ever recorded as delivered in that
+case. `docs/decisions/0002-conversor-pdf-isolado.md` records the boundary that is
+in force and what remains pending.
+
+Build the worker before running the API:
+
+```bash
+go build -o "$PWD/bin/frameops-render" ./cmd/frameops-render
+export FRAMEOPS_PDF_WORKER="$PWD/bin/frameops-render"
+```
+
 ## Data handling
 
 `.env.example` contains placeholders only. Do not commit production credentials, tokens, passwords, customer information, or real evidence. Do not use client data or real evidence in the local environment, tests, fixtures, logs, or documentation examples.

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sayseven7/frameops/internal/domain"
+	"github.com/sayseven7/frameops/internal/render"
 	"github.com/sayseven7/frameops/internal/store/objectstore"
 	"github.com/sayseven7/frameops/internal/store/postgres"
 )
@@ -20,10 +21,11 @@ const sessionCookieName = "__Host-frameops_session"
 type Server struct {
 	pool     *pgxpool.Pool
 	evidence objectstore.Bucket
+	renderer render.Worker
 }
 
-func New(pool *pgxpool.Pool, evidence objectstore.Bucket) http.Handler {
-	return Server{pool: pool, evidence: evidence}
+func New(pool *pgxpool.Pool, evidence objectstore.Bucket, renderer render.Worker) http.Handler {
+	return Server{pool: pool, evidence: evidence, renderer: renderer}
 }
 
 func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Request) {
@@ -50,6 +52,8 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.reportRevisions(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/report-revisions/") && strings.HasSuffix(request.URL.Path, "/approve"):
 		server.approveReportRevision(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/report-revisions/") && strings.HasSuffix(request.URL.Path, "/pdf"):
+		server.reportPDF(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/findings"):
 		server.findings(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/assets"):

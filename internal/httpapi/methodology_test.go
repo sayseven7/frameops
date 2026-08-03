@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sayseven7/frameops/internal/render"
 	"github.com/sayseven7/frameops/internal/store/objectstore"
 )
 
@@ -49,7 +50,7 @@ func TestMethodologyDraftsPublishAndSnapshotEngagementChecklists(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	// The methodology library never reaches object storage.
-	server := New(pool, objectstore.Bucket{})
+	server := New(pool, objectstore.Bucket{}, render.Worker{})
 	organizationID := createOrganization(t, ctx, pool, "Methodology Organization")
 	adminCookie, adminCSRF := signIn(t, ctx, server, pool, organizationID, "admin", "methodology-admin@example.test")
 	authorCookie, authorCSRF := signIn(t, ctx, server, pool, organizationID, "member", "methodology-author@example.test")

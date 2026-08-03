@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sayseven7/frameops/internal/render"
 	"github.com/sayseven7/frameops/internal/store/objectstore"
 )
 
@@ -34,7 +35,7 @@ func TestEvidenceCaptureRecordsIntegrityAndCustody(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	bucket := evidenceBucket(t)
-	server := New(pool, bucket)
+	server := New(pool, bucket, render.Worker{})
 	organizationID := createOrganization(t, ctx, pool, "Evidence Organization")
 	cookie, csrf := signIn(t, ctx, server, pool, organizationID, "admin", "evidence-admin@example.test")
 	findingID := createFinding(t, server, cookie, csrf)
@@ -125,7 +126,7 @@ func TestEvidenceCaptureRecordsIntegrityAndCustody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build unreachable evidence bucket: %v", err)
 	}
-	interrupted := captureRequest(t, New(pool, unreachable), evidencePath, cookie, csrf, "interrupted.txt", "text/plain", "", strings.NewReader("interrupted capture"))
+	interrupted := captureRequest(t, New(pool, unreachable, render.Worker{}), evidencePath, cookie, csrf, "interrupted.txt", "text/plain", "", strings.NewReader("interrupted capture"))
 	if interrupted.Code != http.StatusInternalServerError {
 		t.Fatalf("interrupted capture status = %d, want %d: %s", interrupted.Code, http.StatusInternalServerError, interrupted.Body.String())
 	}
