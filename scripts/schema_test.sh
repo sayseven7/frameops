@@ -28,6 +28,6 @@ docker compose --env-file .env.example exec -T postgres \
 export FRAMEOPS_DATABASE_URL="postgres://${FRAMEOPS_POSTGRES_USER}:${FRAMEOPS_POSTGRES_PASSWORD}@127.0.0.1:${FRAMEOPS_POSTGRES_PORT}/${database_name}?sslmode=disable"
 
 bash scripts/migrate.sh up
-go test ./internal/store/postgres
+go test ./...
 bash scripts/migrate.sh status
 bash scripts/migrate.sh down-to 0
