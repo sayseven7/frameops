@@ -37,6 +37,10 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.engagements(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/findings"):
 		server.findings(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/assets"):
+		server.assets(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/findings/") && strings.HasSuffix(request.URL.Path, "/assets"):
+		server.findingAssets(response, request)
 	default:
 		writeError(response, http.StatusNotFound, "not_found")
 	}
@@ -230,6 +234,100 @@ func (server Server) findings(response http.ResponseWriter, request *http.Reques
 			return
 		}
 		writeJSON(response, http.StatusCreated, finding)
+	default:
+		writeError(response, http.StatusNotFound, "not_found")
+	}
+}
+
+// maxFindingAssets bounds one finding-to-asset replacement so a single request
+// cannot be used to enumerate or rewrite an unbounded set of identifiers.
+const maxFindingAssets = 64
+
+func (server Server) assets(response http.ResponseWriter, request *http.Request) {
+	engagementID := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/engagements/"), "/assets")
+	if engagementID == "" || strings.Contains(engagementID, "/") {
+		writeError(response, http.StatusNotFound, "not_found")
+		return
+	}
+	session, ok := server.session(response, request, request.Method == http.MethodPost)
+	if !ok {
+		return
+	}
+	switch request.Method {
+	case http.MethodGet:
+		items, err := postgres.ListAssets(request.Context(), server.pool, session, engagementID)
+		if errors.Is(err, postgres.ErrNotFound) {
+			writeError(response, http.StatusNotFound, "not_found")
+			return
+		}
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"items": items})
+	case http.MethodPost:
+		var input struct {
+			Name string `json:"name"`
+		}
+		if !decodeJSON(request, &input) || strings.TrimSpace(input.Name) == "" {
+			writeError(response, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		asset, err := postgres.CreateAsset(request.Context(), server.pool, session, engagementID, input.Name)
+		if errors.Is(err, postgres.ErrNotFound) {
+			writeError(response, http.StatusNotFound, "not_found")
+			return
+		}
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		writeJSON(response, http.StatusCreated, asset)
+	default:
+		writeError(response, http.StatusNotFound, "not_found")
+	}
+}
+
+func (server Server) findingAssets(response http.ResponseWriter, request *http.Request) {
+	findingID := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/findings/"), "/assets")
+	if findingID == "" || strings.Contains(findingID, "/") {
+		writeError(response, http.StatusNotFound, "not_found")
+		return
+	}
+	session, ok := server.session(response, request, request.Method == http.MethodPut)
+	if !ok {
+		return
+	}
+	switch request.Method {
+	case http.MethodGet:
+		items, err := postgres.ListFindingAssets(request.Context(), server.pool, session, findingID)
+		if errors.Is(err, postgres.ErrNotFound) {
+			writeError(response, http.StatusNotFound, "not_found")
+			return
+		}
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"items": items})
+	case http.MethodPut:
+		var input struct {
+			AssetIDs []string `json:"assetIds"`
+		}
+		if !decodeJSON(request, &input) || len(input.AssetIDs) > maxFindingAssets {
+			writeError(response, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		items, err := postgres.ReplaceFindingAssets(request.Context(), server.pool, session, findingID, input.AssetIDs)
+		if errors.Is(err, postgres.ErrNotFound) {
+			writeError(response, http.StatusNotFound, "not_found")
+			return
+		}
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"items": items})
 	default:
 		writeError(response, http.StatusNotFound, "not_found")
 	}

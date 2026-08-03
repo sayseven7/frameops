@@ -156,6 +156,67 @@ func TestAssetsRequireAnEngagementFromTheirOrganization(t *testing.T) {
 	}
 }
 
+func TestFindingAssetsRejectAnAssetFromAnotherEngagement(t *testing.T) {
+	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("FRAMEOPS_DATABASE_URL is required for schema integration tests")
+	}
+
+	ctx := context.Background()
+	connection, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to schema test database: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := connection.Close(ctx); err != nil {
+			t.Errorf("close schema test database connection: %v", err)
+		}
+	})
+
+	var organizationID, userID, clientID, engagementID, siblingID, findingID, assetID, siblingAssetID string
+	if err := connection.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Link Organization') RETURNING id`).Scan(&organizationID); err != nil {
+		t.Fatalf("create synthetic organization: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO users (display_name, email) VALUES ('Link Member', 'link-member@example.test') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("create synthetic user: %v", err)
+	}
+	if _, err := connection.Exec(ctx, `INSERT INTO organization_memberships (organization_id, user_id, role) VALUES ($1, $2, 'member')`, organizationID, userID); err != nil {
+		t.Fatalf("create synthetic membership: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO clients (organization_id, name) VALUES ($1, 'Link Client') RETURNING id`, organizationID).Scan(&clientID); err != nil {
+		t.Fatalf("create synthetic client: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO engagements (organization_id, client_id, name) VALUES ($1, $2, 'Link Engagement') RETURNING id`, organizationID, clientID).Scan(&engagementID); err != nil {
+		t.Fatalf("create synthetic engagement: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO engagements (organization_id, client_id, name) VALUES ($1, $2, 'Sibling Engagement') RETURNING id`, organizationID, clientID).Scan(&siblingID); err != nil {
+		t.Fatalf("create sibling engagement: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO findings (organization_id, engagement_id, title, cvss_vector, cvss_score, created_by) VALUES ($1, $2, 'Link Finding', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', 9.8, $3) RETURNING id`, organizationID, engagementID, userID).Scan(&findingID); err != nil {
+		t.Fatalf("create synthetic finding: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO assets (organization_id, engagement_id, name) VALUES ($1, $2, 'Link Asset') RETURNING id`, organizationID, engagementID).Scan(&assetID); err != nil {
+		t.Fatalf("create synthetic asset: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO assets (organization_id, engagement_id, name) VALUES ($1, $2, 'Sibling Asset') RETURNING id`, organizationID, siblingID).Scan(&siblingAssetID); err != nil {
+		t.Fatalf("create sibling asset: %v", err)
+	}
+	if _, err := connection.Exec(ctx, `INSERT INTO finding_assets (organization_id, engagement_id, finding_id, asset_id) VALUES ($1, $2, $3, $4)`, organizationID, engagementID, findingID, assetID); err != nil {
+		t.Fatalf("link same-engagement asset: %v", err)
+	}
+
+	var databaseError *pgconn.PgError
+	_, err = connection.Exec(ctx, `INSERT INTO finding_assets (organization_id, engagement_id, finding_id, asset_id) VALUES ($1, $2, $3, $4)`, organizationID, engagementID, findingID, siblingAssetID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("sibling-engagement link error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+
+	_, err = connection.Exec(ctx, `INSERT INTO finding_assets (organization_id, engagement_id, finding_id, asset_id) VALUES ($1, $2, $3, $4)`, organizationID, siblingID, findingID, siblingAssetID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("relabelled-engagement link error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+}
+
 func TestAuditEventsAreAppendOnlyAndActorsBelongToTheirOrganization(t *testing.T) {
 	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
 	if databaseURL == "" {

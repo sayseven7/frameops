@@ -73,6 +73,13 @@ type Engagement struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type Asset struct {
+	ID           string    `json:"id"`
+	EngagementID string    `json:"engagementId"`
+	Name         string    `json:"name"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 type Finding struct {
 	ID               string    `json:"id"`
 	EngagementID     string    `json:"engagementId"`
@@ -451,6 +458,141 @@ func CreateFinding(ctx context.Context, pool interface {
 		return Finding{}, fmt.Errorf("commit finding transaction: %w", err)
 	}
 	return finding, nil
+}
+
+func CreateAsset(ctx context.Context, pool interface {
+	Begin(context.Context) (pgx.Tx, error)
+}, session Session, engagementID, name string) (Asset, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Asset{}, errors.New("asset name is required")
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Asset{}, fmt.Errorf("begin asset transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var asset Asset
+	err = tx.QueryRow(ctx, `INSERT INTO assets (organization_id, engagement_id, name) SELECT $1, id, $3 FROM engagements WHERE organization_id = $1 AND id = $2 RETURNING id, engagement_id, name, created_at`, session.OrganizationID, engagementID, name).Scan(&asset.ID, &asset.EngagementID, &asset.Name, &asset.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Asset{}, ErrNotFound
+	}
+	if err != nil {
+		return Asset{}, fmt.Errorf("insert asset: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'asset.created', 'asset', $3, 'success', gen_random_uuid(), '{}'::jsonb)`, session.OrganizationID, session.UserID, asset.ID); err != nil {
+		return Asset{}, fmt.Errorf("audit asset creation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Asset{}, fmt.Errorf("commit asset transaction: %w", err)
+	}
+	return asset, nil
+}
+
+func ListAssets(ctx context.Context, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, session Session, engagementID string) ([]Asset, error) {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM engagements WHERE organization_id = $1 AND id = $2)`, session.OrganizationID, engagementID).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("find engagement: %w", err)
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	rows, err := pool.Query(ctx, `SELECT id, engagement_id, name, created_at FROM assets WHERE organization_id = $1 AND engagement_id = $2 ORDER BY created_at, id`, session.OrganizationID, engagementID)
+	if err != nil {
+		return nil, fmt.Errorf("list assets: %w", err)
+	}
+	return scanAssets(rows)
+}
+
+func ListFindingAssets(ctx context.Context, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, session Session, findingID string) ([]Asset, error) {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM findings WHERE organization_id = $1 AND id = $2)`, session.OrganizationID, findingID).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("find finding: %w", err)
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	return linkedAssets(ctx, pool, session, findingID)
+}
+
+// ReplaceFindingAssets swaps a finding's whole asset set in one transaction. Any
+// requested asset outside the finding's own organization and engagement, including
+// one owned by a sibling engagement, leaves the finding untouched and reports
+// ErrNotFound so callers cannot probe for identifiers they do not own.
+func ReplaceFindingAssets(ctx context.Context, pool interface {
+	Begin(context.Context) (pgx.Tx, error)
+}, session Session, findingID string, assetIDs []string) ([]Asset, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin finding asset transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var engagementID string
+	err = tx.QueryRow(ctx, `SELECT engagement_id FROM findings WHERE organization_id = $1 AND id = $2 FOR UPDATE`, session.OrganizationID, findingID).Scan(&engagementID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock finding: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM finding_assets WHERE organization_id = $1 AND finding_id = $2`, session.OrganizationID, findingID); err != nil {
+		return nil, fmt.Errorf("clear finding assets: %w", err)
+	}
+	var owned bool
+	if err := tx.QueryRow(ctx, `WITH requested AS (
+		SELECT DISTINCT unnest($4::uuid[]) AS id
+	), linked AS (
+		INSERT INTO finding_assets (organization_id, engagement_id, finding_id, asset_id)
+		SELECT $1, $2, $3, requested.id FROM requested
+		JOIN assets ON assets.organization_id = $1 AND assets.engagement_id = $2 AND assets.id = requested.id
+		RETURNING asset_id
+	)
+	SELECT (SELECT count(*) FROM requested) = (SELECT count(*) FROM linked)`, session.OrganizationID, engagementID, findingID, assetIDs).Scan(&owned); err != nil {
+		return nil, fmt.Errorf("link finding assets: %w", err)
+	}
+	if !owned {
+		return nil, ErrNotFound
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'finding.assets.replaced', 'finding', $3, 'success', gen_random_uuid(), '{}'::jsonb)`, session.OrganizationID, session.UserID, findingID); err != nil {
+		return nil, fmt.Errorf("audit finding asset replacement: %w", err)
+	}
+	assets, err := linkedAssets(ctx, tx, session, findingID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit finding asset transaction: %w", err)
+	}
+	return assets, nil
+}
+
+func linkedAssets(ctx context.Context, queryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, session Session, findingID string) ([]Asset, error) {
+	rows, err := queryer.Query(ctx, `SELECT assets.id, assets.engagement_id, assets.name, assets.created_at FROM finding_assets JOIN assets ON assets.organization_id = finding_assets.organization_id AND assets.id = finding_assets.asset_id WHERE finding_assets.organization_id = $1 AND finding_assets.finding_id = $2 ORDER BY assets.created_at, assets.id`, session.OrganizationID, findingID)
+	if err != nil {
+		return nil, fmt.Errorf("list finding assets: %w", err)
+	}
+	return scanAssets(rows)
+}
+
+func scanAssets(rows pgx.Rows) ([]Asset, error) {
+	defer rows.Close()
+	var assets []Asset
+	for rows.Next() {
+		var asset Asset
+		if err := rows.Scan(&asset.ID, &asset.EngagementID, &asset.Name, &asset.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan asset: %w", err)
+		}
+		assets = append(assets, asset)
+	}
+	return assets, rows.Err()
 }
 
 func ListFindings(ctx context.Context, pool interface {
