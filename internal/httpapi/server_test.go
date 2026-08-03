@@ -215,6 +215,77 @@ func TestAuthenticatedOrganizationPortfolio(t *testing.T) {
 		t.Fatalf("triage replay status = %d, want %d invalid_state: %s", replay.Code, http.StatusConflict, replay.Body.String())
 	}
 
+	retestsPath := "/v1/findings/" + url.PathEscape(findingBody.ID) + "/retests"
+	const stillOpenRound = `{"round":1,"resultState":"open","procedure":"Replayed the crafted login request","observedResult":"The database error still leaked","justification":"Fix was not deployed to the tested build"}`
+	const fixedRound = `{"round":2,"resultState":"fixed","procedure":"Replayed the crafted login request","observedResult":"The query is parameterized and the payload is rejected","justification":"Verified against the patched build"}`
+	if uncsrfed := request(t, server, http.MethodPost, retestsPath, stillOpenRound, memberCookie, ""); uncsrfed.Code != http.StatusForbidden {
+		t.Fatalf("retest without CSRF status = %d, want %d", uncsrfed.Code, http.StatusForbidden)
+	}
+	for _, invalid := range []string{
+		`{"round":0,"resultState":"open","procedure":"Replayed","observedResult":"Still vulnerable","justification":"Not deployed"}`,
+		`{"round":1,"resultState":"risk_accepted","procedure":"Replayed","observedResult":"Still vulnerable","justification":"Client accepted"}`,
+		`{"round":1,"resultState":"confirmed","procedure":"Replayed","observedResult":"Still vulnerable","justification":"Not deployed"}`,
+		`{"round":1,"resultState":"fixed","procedure":"   ","observedResult":"Rejected","justification":"Verified"}`,
+		`{"round":1,"resultState":"fixed","procedure":"Replayed","observedResult":"","justification":"Verified"}`,
+		`{"round":1,"resultState":"fixed","procedure":"Replayed","observedResult":"Rejected","justification":""}`,
+	} {
+		rejected := request(t, server, http.MethodPost, retestsPath, invalid, memberCookie, memberCSRF)
+		if rejected.Code != http.StatusBadRequest {
+			t.Fatalf("invalid retest %s status = %d, want %d: %s", invalid, rejected.Code, http.StatusBadRequest, rejected.Body.String())
+		}
+	}
+	firstRound := request(t, server, http.MethodPost, retestsPath, stillOpenRound, memberCookie, memberCSRF)
+	if firstRound.Code != http.StatusCreated {
+		t.Fatalf("first retest round status = %d, want %d: %s", firstRound.Code, http.StatusCreated, firstRound.Body.String())
+	}
+	for _, fragment := range []string{`"round":1`, `"previousState":"open"`, `"resultState":"open"`, `"findingId":"` + findingBody.ID + `"`} {
+		if !strings.Contains(firstRound.Body.String(), fragment) {
+			t.Fatalf("first retest body = %s, want fragment %s", firstRound.Body.String(), fragment)
+		}
+	}
+	stillOpen := request(t, server, http.MethodGet, "/v1/engagements/"+url.PathEscape(engagementBody.ID)+"/findings", "", memberCookie, "")
+	if stillOpen.Code != http.StatusOK || !strings.Contains(stillOpen.Body.String(), `"remediationState":"open"`) {
+		t.Fatalf("findings after a reproducing retest status = %d, body=%s", stillOpen.Code, stillOpen.Body.String())
+	}
+	if replayed := request(t, server, http.MethodPost, retestsPath, stillOpenRound, memberCookie, memberCSRF); replayed.Code != http.StatusConflict || !strings.Contains(replayed.Body.String(), "invalid_state") {
+		t.Fatalf("replayed retest round status = %d, want %d invalid_state: %s", replayed.Code, http.StatusConflict, replayed.Body.String())
+	}
+	skipped := request(t, server, http.MethodPost, retestsPath, strings.Replace(fixedRound, `"round":2`, `"round":5`, 1), memberCookie, memberCSRF)
+	if skipped.Code != http.StatusConflict {
+		t.Fatalf("skipped retest round status = %d, want %d: %s", skipped.Code, http.StatusConflict, skipped.Body.String())
+	}
+	secondRound := request(t, server, http.MethodPost, retestsPath, fixedRound, memberCookie, memberCSRF)
+	if secondRound.Code != http.StatusCreated || !strings.Contains(secondRound.Body.String(), `"resultState":"fixed"`) {
+		t.Fatalf("second retest round status = %d, body=%s", secondRound.Code, secondRound.Body.String())
+	}
+	derived := request(t, server, http.MethodGet, "/v1/engagements/"+url.PathEscape(engagementBody.ID)+"/findings", "", memberCookie, "")
+	if derived.Code != http.StatusOK || !strings.Contains(derived.Body.String(), `"remediationState":"fixed"`) || !strings.Contains(derived.Body.String(), `"validationState":"confirmed"`) {
+		t.Fatalf("findings after a closing retest status = %d, body=%s", derived.Code, derived.Body.String())
+	}
+	closed := request(t, server, http.MethodPost, retestsPath, strings.Replace(fixedRound, `"round":2`, `"round":3`, 1), memberCookie, memberCSRF)
+	if closed.Code != http.StatusConflict || !strings.Contains(closed.Body.String(), "invalid_state") {
+		t.Fatalf("retest of a closed finding status = %d, want %d invalid_state: %s", closed.Code, http.StatusConflict, closed.Body.String())
+	}
+	history := request(t, server, http.MethodGet, retestsPath, "", memberCookie, "")
+	if history.Code != http.StatusOK {
+		t.Fatalf("retest history status = %d, want %d: %s", history.Code, http.StatusOK, history.Body.String())
+	}
+	var historyBody struct {
+		Items []struct {
+			Round       int    `json:"round"`
+			ResultState string `json:"resultState"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(history.Body).Decode(&historyBody); err != nil {
+		t.Fatalf("decode retest history = %v", err)
+	}
+	if len(historyBody.Items) != 2 || historyBody.Items[0].Round != 1 || historyBody.Items[0].ResultState != "open" || historyBody.Items[1].Round != 2 || historyBody.Items[1].ResultState != "fixed" {
+		t.Fatalf("retest history = %#v, want rounds 1 open then 2 fixed", historyBody.Items)
+	}
+	if missing := request(t, server, http.MethodGet, "/v1/findings/00000000-0000-0000-0000-000000000000/retests", "", memberCookie, ""); missing.Code != http.StatusNotFound {
+		t.Fatalf("unknown finding retest history status = %d, want %d", missing.Code, http.StatusNotFound)
+	}
+
 	var outsiderOrganizationID string
 	if err := pool.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Outside Organization') RETURNING id`).Scan(&outsiderOrganizationID); err != nil {
 		t.Fatalf("create outside organization: %v", err)
@@ -222,6 +293,12 @@ func TestAuthenticatedOrganizationPortfolio(t *testing.T) {
 	outsiderCookie, outsiderCSRF := signIn(t, ctx, server, pool, outsiderOrganizationID, "admin", "triage-outsider@example.test")
 	if outsider := request(t, server, http.MethodPut, triagePath, confirmOpen, outsiderCookie, outsiderCSRF); outsider.Code != http.StatusNotFound {
 		t.Fatalf("cross-organization triage status = %d, want %d: %s", outsider.Code, http.StatusNotFound, outsider.Body.String())
+	}
+	if outsider := request(t, server, http.MethodPost, retestsPath, stillOpenRound, outsiderCookie, outsiderCSRF); outsider.Code != http.StatusNotFound {
+		t.Fatalf("cross-organization retest status = %d, want %d: %s", outsider.Code, http.StatusNotFound, outsider.Body.String())
+	}
+	if outsider := request(t, server, http.MethodGet, retestsPath, "", outsiderCookie, ""); outsider.Code != http.StatusNotFound {
+		t.Fatalf("cross-organization retest history status = %d, want %d: %s", outsider.Code, http.StatusNotFound, outsider.Body.String())
 	}
 	unknown := request(t, server, http.MethodPut, "/v1/findings/00000000-0000-0000-0000-000000000000/triage", confirmOpen, memberCookie, memberCSRF)
 	if unknown.Code != http.StatusNotFound {
@@ -253,6 +330,17 @@ func TestAuthenticatedOrganizationPortfolio(t *testing.T) {
 	}
 	if count := auditCount(t, ctx, pool, admin.OrganizationID, "finding.triage.confirmed"); count != 1 {
 		t.Fatalf("finding triage audit events = %d, want 1", count)
+	}
+	if count := auditCount(t, ctx, pool, admin.OrganizationID, "finding.retest.recorded"); count != 2 {
+		t.Fatalf("finding retest audit events = %d, want 2", count)
+	}
+	var auditedRound int
+	var auditedResult string
+	if err := pool.QueryRow(ctx, `SELECT (context->>'round')::int, context->>'resultState' FROM audit_events WHERE organization_id = $1 AND action = 'finding.retest.recorded' ORDER BY created_at DESC, id LIMIT 1`, admin.OrganizationID).Scan(&auditedRound, &auditedResult); err != nil {
+		t.Fatalf("read retest audit context: %v", err)
+	}
+	if auditedRound != 2 || auditedResult != "fixed" {
+		t.Fatalf("retest audit context = round %d %q, want round 2 \"fixed\"", auditedRound, auditedResult)
 	}
 }
 

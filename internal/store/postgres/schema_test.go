@@ -217,6 +217,97 @@ func TestFindingAssetsRejectAnAssetFromAnotherEngagement(t *testing.T) {
 	}
 }
 
+func TestFindingRetestsAreImmutableSequentialRoundsOwnedByOneOrganization(t *testing.T) {
+	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("FRAMEOPS_DATABASE_URL is required for schema integration tests")
+	}
+
+	ctx := context.Background()
+	connection, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to schema test database: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := connection.Close(ctx); err != nil {
+			t.Errorf("close schema test database connection: %v", err)
+		}
+	})
+
+	var organizationID, otherOrganizationID, userID, clientID, engagementID, siblingID, findingID, roundID string
+	if err := connection.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Retest Organization') RETURNING id`).Scan(&organizationID); err != nil {
+		t.Fatalf("create synthetic organization: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO organizations (name) VALUES ('Retest Outside Organization') RETURNING id`).Scan(&otherOrganizationID); err != nil {
+		t.Fatalf("create outside organization: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO users (display_name, email) VALUES ('Retest Member', 'retest-member@example.test') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("create synthetic user: %v", err)
+	}
+	if _, err := connection.Exec(ctx, `INSERT INTO organization_memberships (organization_id, user_id, role) VALUES ($1, $2, 'member')`, organizationID, userID); err != nil {
+		t.Fatalf("create synthetic membership: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO clients (organization_id, name) VALUES ($1, 'Retest Client') RETURNING id`, organizationID).Scan(&clientID); err != nil {
+		t.Fatalf("create synthetic client: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO engagements (organization_id, client_id, name) VALUES ($1, $2, 'Retest Engagement') RETURNING id`, organizationID, clientID).Scan(&engagementID); err != nil {
+		t.Fatalf("create synthetic engagement: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO engagements (organization_id, client_id, name) VALUES ($1, $2, 'Retest Sibling Engagement') RETURNING id`, organizationID, clientID).Scan(&siblingID); err != nil {
+		t.Fatalf("create sibling engagement: %v", err)
+	}
+	if err := connection.QueryRow(ctx, `INSERT INTO findings (organization_id, engagement_id, title, cvss_vector, cvss_score, validation_state, remediation_state, created_by) VALUES ($1, $2, 'Retest Finding', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', 9.8, 'confirmed', 'open', $3) RETURNING id`, organizationID, engagementID, userID).Scan(&findingID); err != nil {
+		t.Fatalf("create synthetic finding: %v", err)
+	}
+
+	const insertRound = `INSERT INTO finding_retests (organization_id, engagement_id, finding_id, round_number, previous_state, result_state, executed_procedure, observed_result, justification, performed_by) VALUES ($1, $2, $3, $4, $5, $6, 'Replayed the login request', 'Payload still returned the database error', 'Fix not deployed yet', $7) RETURNING id`
+	if err := connection.QueryRow(ctx, insertRound, organizationID, engagementID, findingID, 1, "open", "open", userID).Scan(&roundID); err != nil {
+		t.Fatalf("record first retest round: %v", err)
+	}
+
+	var databaseError *pgconn.PgError
+	_, err = connection.Exec(ctx, insertRound, organizationID, engagementID, findingID, 1, "open", "fixed", userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23505" {
+		t.Fatalf("replayed round error = %v, want PostgreSQL unique-violation 23505", err)
+	}
+
+	_, err = connection.Exec(ctx, insertRound, organizationID, engagementID, findingID, 3, "open", "fixed", userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("skipped round error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+
+	for _, transition := range [][2]string{{"fixed", "open"}, {"open", "risk_accepted"}, {"not_reproduced", "fixed"}} {
+		_, err = connection.Exec(ctx, insertRound, organizationID, engagementID, findingID, 2, transition[0], transition[1], userID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "23514" {
+			t.Fatalf("unsupported %s to %s transition error = %v, want PostgreSQL check-violation 23514", transition[0], transition[1], err)
+		}
+	}
+
+	_, err = connection.Exec(ctx, insertRound, organizationID, siblingID, findingID, 2, "open", "fixed", userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("relabelled-engagement round error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+
+	_, err = connection.Exec(ctx, insertRound, otherOrganizationID, engagementID, findingID, 2, "open", "fixed", userID)
+	if !errors.As(err, &databaseError) || databaseError.Code != "23503" {
+		t.Fatalf("cross-organization round error = %v, want PostgreSQL foreign-key violation 23503", err)
+	}
+
+	for _, statement := range []string{
+		`UPDATE finding_retests SET result_state = 'fixed' WHERE id = $1`,
+		`DELETE FROM finding_retests WHERE id = $1`,
+	} {
+		_, err = connection.Exec(ctx, statement, roundID)
+		if !errors.As(err, &databaseError) || databaseError.Code != "P0001" {
+			t.Fatalf("immutable retest mutation error = %v, want PostgreSQL raise-exception P0001", err)
+		}
+	}
+
+	if _, err := connection.Exec(ctx, insertRound, organizationID, engagementID, findingID, 2, "open", "fixed", userID); err != nil {
+		t.Fatalf("record second retest round: %v", err)
+	}
+}
+
 func TestAuditEventsAreAppendOnlyAndActorsBelongToTheirOrganization(t *testing.T) {
 	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
 	if databaseURL == "" {

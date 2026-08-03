@@ -44,6 +44,8 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.findingAssets(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/findings/") && strings.HasSuffix(request.URL.Path, "/triage"):
 		server.triage(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/findings/") && strings.HasSuffix(request.URL.Path, "/retests"):
+		server.retests(response, request)
 	default:
 		writeError(response, http.StatusNotFound, "not_found")
 	}
@@ -369,6 +371,68 @@ func (server Server) triage(response http.ResponseWriter, request *http.Request)
 	default:
 		writeJSON(response, http.StatusOK, finding)
 	}
+}
+
+// retests reads and appends the retest history of one confirmed finding. A round
+// may only be recorded while the finding is still 'open', and it either leaves it
+// open or closes it as 'fixed' or 'not_reproduced'; those two stay distinct
+// because an unreproduced finding is not proof that a correction was made.
+// Accepting a risk is a separate decision and is refused here. The caller names
+// the round it believes is next, so a replayed request is a conflict rather than
+// a duplicated round, and the store owns the current-state decision.
+func (server Server) retests(response http.ResponseWriter, request *http.Request) {
+	findingID, ok := pathID(request.URL.Path, "/v1/findings/", "/retests")
+	if !ok {
+		writeError(response, http.StatusNotFound, "not_found")
+		return
+	}
+	session, ok := server.session(response, request, request.Method == http.MethodPost)
+	if !ok {
+		return
+	}
+	switch request.Method {
+	case http.MethodGet:
+		items, err := postgres.ListRetests(request.Context(), server.pool, session, findingID)
+		if errors.Is(err, postgres.ErrNotFound) {
+			writeError(response, http.StatusNotFound, "not_found")
+			return
+		}
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"items": items})
+	case http.MethodPost:
+		var input struct {
+			Round          int    `json:"round"`
+			ResultState    string `json:"resultState"`
+			Procedure      string `json:"procedure"`
+			ObservedResult string `json:"observedResult"`
+			Justification  string `json:"justification"`
+		}
+		if !decodeJSON(request, &input) || input.Round < 1 || !supportedRetestResult(input.ResultState) ||
+			strings.TrimSpace(input.Procedure) == "" || strings.TrimSpace(input.ObservedResult) == "" || strings.TrimSpace(input.Justification) == "" {
+			writeError(response, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		retest, err := postgres.RecordRetest(request.Context(), server.pool, session, findingID, postgres.Retest{Round: input.Round, ResultState: input.ResultState, Procedure: input.Procedure, ObservedResult: input.ObservedResult, Justification: input.Justification})
+		switch {
+		case errors.Is(err, postgres.ErrNotFound):
+			writeError(response, http.StatusNotFound, "not_found")
+		case errors.Is(err, postgres.ErrInvalidState):
+			writeError(response, http.StatusConflict, "invalid_state")
+		case err != nil:
+			writeError(response, http.StatusInternalServerError, "internal_error")
+		default:
+			writeJSON(response, http.StatusCreated, retest)
+		}
+	default:
+		writeError(response, http.StatusNotFound, "not_found")
+	}
+}
+
+func supportedRetestResult(state string) bool {
+	return state == "open" || state == "fixed" || state == "not_reproduced"
 }
 
 // pathID reads the single identifier a route carries between its prefix and its

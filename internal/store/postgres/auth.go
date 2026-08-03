@@ -96,6 +96,19 @@ type Finding struct {
 	CreatedAt        time.Time `json:"createdAt"`
 }
 
+type Retest struct {
+	ID             string    `json:"id"`
+	FindingID      string    `json:"findingId"`
+	Round          int       `json:"round"`
+	PreviousState  string    `json:"previousState"`
+	ResultState    string    `json:"resultState"`
+	Procedure      string    `json:"procedure"`
+	ObservedResult string    `json:"observedResult"`
+	Justification  string    `json:"justification"`
+	PerformedBy    string    `json:"performedBy"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
 // BootstrapFirstAdmin consumes the local one-time credential only after its database transaction commits.
 func BootstrapFirstAdmin(ctx context.Context, pool interface {
 	Begin(context.Context) (pgx.Tx, error)
@@ -496,6 +509,89 @@ func TriageFinding(ctx context.Context, pool interface {
 		return Finding{}, fmt.Errorf("commit finding triage transaction: %w", err)
 	}
 	return finding, nil
+}
+
+// RecordRetest appends one immutable retest round and advances the finding's
+// current remediation state in the same transaction, so the state a reader sees
+// is always the one the recorded history produced. Ownership and the required
+// current state are one predicate on the update itself: a finding owned by
+// another organization is indistinguishable from a missing one, and a concurrent
+// caller waits for the row and then finds a state it may no longer retest. The
+// caller names the round it believes is next, so a replayed request is refused
+// instead of appending a second round for the same work.
+func RecordRetest(ctx context.Context, pool interface {
+	Begin(context.Context) (pgx.Tx, error)
+}, session Session, findingID string, retest Retest) (Retest, error) {
+	retest.Procedure = strings.TrimSpace(retest.Procedure)
+	retest.ObservedResult = strings.TrimSpace(retest.ObservedResult)
+	retest.Justification = strings.TrimSpace(retest.Justification)
+	if retest.Procedure == "" || retest.ObservedResult == "" || retest.Justification == "" {
+		return Retest{}, errors.New("retest procedure, observed result, and justification are required")
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Retest{}, fmt.Errorf("begin retest transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var engagementID string
+	err = tx.QueryRow(ctx, `UPDATE findings SET remediation_state = $3 WHERE organization_id = $1 AND id = $2 AND validation_state = 'confirmed' AND remediation_state = 'open' RETURNING engagement_id`, session.OrganizationID, findingID, retest.ResultState).Scan(&engagementID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM findings WHERE organization_id = $1 AND id = $2)`, session.OrganizationID, findingID).Scan(&exists); err != nil {
+			return Retest{}, fmt.Errorf("find finding: %w", err)
+		}
+		if !exists {
+			return Retest{}, ErrNotFound
+		}
+		return Retest{}, ErrInvalidState
+	}
+	if err != nil {
+		return Retest{}, fmt.Errorf("advance finding remediation state: %w", err)
+	}
+	var nextRound int
+	if err := tx.QueryRow(ctx, `SELECT coalesce(max(round_number), 0) + 1 FROM finding_retests WHERE organization_id = $1 AND finding_id = $2`, session.OrganizationID, findingID).Scan(&nextRound); err != nil {
+		return Retest{}, fmt.Errorf("read retest history: %w", err)
+	}
+	if retest.Round != nextRound {
+		return Retest{}, ErrInvalidState
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO finding_retests (organization_id, engagement_id, finding_id, round_number, previous_state, result_state, executed_procedure, observed_result, justification, performed_by) VALUES ($1, $2, $3, $4, 'open', $5, $6, $7, $8, $9) RETURNING id, finding_id, round_number, previous_state, result_state, executed_procedure, observed_result, justification, performed_by, created_at`, session.OrganizationID, engagementID, findingID, retest.Round, retest.ResultState, retest.Procedure, retest.ObservedResult, retest.Justification, session.UserID).Scan(&retest.ID, &retest.FindingID, &retest.Round, &retest.PreviousState, &retest.ResultState, &retest.Procedure, &retest.ObservedResult, &retest.Justification, &retest.PerformedBy, &retest.CreatedAt); err != nil {
+		return Retest{}, fmt.Errorf("insert retest round: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'finding.retest.recorded', 'finding', $3, 'success', gen_random_uuid(), jsonb_build_object('round', $4::int, 'previousState', $5::text, 'resultState', $6::text))`, session.OrganizationID, session.UserID, findingID, retest.Round, retest.PreviousState, retest.ResultState); err != nil {
+		return Retest{}, fmt.Errorf("audit retest round: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Retest{}, fmt.Errorf("commit retest transaction: %w", err)
+	}
+	return retest, nil
+}
+
+func ListRetests(ctx context.Context, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, session Session, findingID string) ([]Retest, error) {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM findings WHERE organization_id = $1 AND id = $2)`, session.OrganizationID, findingID).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("find finding: %w", err)
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	rows, err := pool.Query(ctx, `SELECT id, finding_id, round_number, previous_state, result_state, executed_procedure, observed_result, justification, performed_by, created_at FROM finding_retests WHERE organization_id = $1 AND finding_id = $2 ORDER BY round_number`, session.OrganizationID, findingID)
+	if err != nil {
+		return nil, fmt.Errorf("list retests: %w", err)
+	}
+	defer rows.Close()
+	var retests []Retest
+	for rows.Next() {
+		var retest Retest
+		if err := rows.Scan(&retest.ID, &retest.FindingID, &retest.Round, &retest.PreviousState, &retest.ResultState, &retest.Procedure, &retest.ObservedResult, &retest.Justification, &retest.PerformedBy, &retest.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan retest: %w", err)
+		}
+		retests = append(retests, retest)
+	}
+	return retests, rows.Err()
 }
 
 func CreateAsset(ctx context.Context, pool interface {
