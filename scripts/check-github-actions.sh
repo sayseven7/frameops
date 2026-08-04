@@ -8,6 +8,17 @@ if [[ ! -d "$workflows_dir" ]]; then
   exit 1
 fi
 
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if git ls-files --stage .worktrees | grep -q '^160000 '; then
+    printf 'tracked .worktrees gitlinks break GitHub checkout\n' >&2
+    exit 1
+  fi
+  if ! git check-ignore -q .worktrees/contract-probe; then
+    printf '.worktrees/ must be ignored\n' >&2
+    exit 1
+  fi
+fi
+
 shopt -s nullglob
 workflows=("$workflows_dir"/*.yml "$workflows_dir"/*.yaml)
 if ((${#workflows[@]} == 0)); then
@@ -74,6 +85,20 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
         step = re.split(r"(?m)^\s*-\s", text[checkout.end():], maxsplit=1)[0]
         if not re.search(r"(?m)^\s+persist-credentials:\s*false\s*$", step):
             errors.append(f"{prefix} checkout must set persist-credentials: false")
+    for install in re.finditer(r"(?m)^\s*- run: (.*go install github\.com/golangci/golangci-lint/[^\n]+)$", text):
+        if not install.group(1).startswith("GOTOOLCHAIN=go1.26.5 "):
+            errors.append(f"{prefix} golangci-lint must be built with Go 1.26.5")
+    for upload in re.finditer(
+        r"(?m)^(?P<indent>\s*)- uses: github/codeql-action/upload-sarif@[^\s#]+[^\n]*",
+        text,
+    ):
+        indent = upload.group("indent")
+        step = re.split(rf"(?m)^{re.escape(indent)}-\s", text[upload.end():], maxsplit=1)[0]
+        sarif = re.search(r"(?m)^\s+sarif_file:\s*([^\s#]+)\s*$", step)
+        if re.search(r"(?m)^\s+if:.*always\(\)", step):
+            expected = re.escape(indent + "  ") + rf"if: always\(\) && hashFiles\('{re.escape(sarif.group(1) if sarif else '')}'\) != ''"
+            if sarif is None or not re.search(rf"(?m)^{expected}\s*$", step):
+                errors.append(f"{prefix} always-run SARIF upload must require its output file")
 
 if errors:
     print("GitHub Actions contract check failed:", file=sys.stderr)

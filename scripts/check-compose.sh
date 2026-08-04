@@ -52,7 +52,7 @@ minio = config.get("services", {}).get("minio")
 if minio is None:
     errors.append("missing services.minio")
 else:
-    expected = "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2"
+    expected = "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
     image = minio.get("image", "")
     if image != expected:
         errors.append(f"unexpected MinIO image: {image!r}; expected {expected!r}")
