@@ -74,6 +74,16 @@ func readNmapReport(reader io.Reader) (nmapImport, error) {
 	if err := decoder.Decode(&report); err != nil {
 		return nmapImport{}, errInvalidNmapReport
 	}
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		data, whitespace := token.(xml.CharData)
+		if err != nil || !whitespace || strings.TrimSpace(string(data)) != "" {
+			return nmapImport{}, errInvalidNmapReport
+		}
+	}
 	if !strings.EqualFold(strings.TrimSpace(report.Scanner), "nmap") {
 		return nmapImport{}, errInvalidNmapReport
 	}
