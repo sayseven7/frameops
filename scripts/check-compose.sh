@@ -1,16 +1,32 @@
 #!/bin/bash
 set -euo pipefail
 
+fifo_dir=$(mktemp -d)
+trap 'rm -rf "$fifo_dir"' EXIT
+export FRAMEOPS_MINIO_ROOT_USER_FIFO="$fifo_dir/minio-root-user"
+export FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO="$fifo_dir/minio-root-password"
+mkfifo "$FRAMEOPS_MINIO_ROOT_USER_FIFO" "$FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO"
+
 rendered=$(docker compose --env-file .env.example config --format json)
 docker compose --env-file .env.example config --quiet
 
 RENDERED_COMPOSE="$rendered" python3 - <<'PY'
 import json
 import os
+import re
 import sys
 
 config = json.loads(os.environ["RENDERED_COMPOSE"])
 errors = []
+compose_source = open("compose.yaml").read()
+expected_fifo_sources = {
+    "/run/secrets/minio-root-user": "FRAMEOPS_MINIO_ROOT_USER_FIFO",
+    "/run/secrets/minio-root-password": "FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO",
+}
+for target, variable in expected_fifo_sources.items():
+    pattern = rf"(?m)^        source: \$\{{{variable}:[^}}\n]*\}}\n        target: {re.escape(target)}\n        read_only: true\n        bind:\n          create_host_path: false$"
+    if not re.search(pattern, compose_source):
+        errors.append(f"compose.yaml must bind {variable} read-only at {target} with create_host_path disabled")
 postgres = config.get("services", {}).get("postgres")
 if postgres is None:
     errors.append("missing services.postgres")
@@ -59,8 +75,12 @@ else:
     if image.endswith(":latest") or "@sha256:" not in image:
         errors.append("MinIO must use an immutable image reference and must not use :latest")
     environment = minio.get("environment", {})
-    if not isinstance(environment, dict) or not {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"}.issubset(environment):
-        errors.append("MinIO must require MINIO_ROOT_USER and MINIO_ROOT_PASSWORD")
+    expected_environment = {
+        "MINIO_ROOT_USER_FILE": "/run/secrets/minio-root-user",
+        "MINIO_ROOT_PASSWORD_FILE": "/run/secrets/minio-root-password",
+    }
+    if environment != expected_environment:
+        errors.append("MinIO must use only MINIO_ROOT_*_FILE paths, never direct root environment variables")
     healthcheck = minio.get("healthcheck", {})
     healthcheck_test = healthcheck.get("test")
     if not isinstance(healthcheck_test, list) or len(healthcheck_test) != 2 or healthcheck_test[0] != "CMD-SHELL" or "curl -f http://localhost:9000/minio/health/live" not in healthcheck_test[1]:
@@ -76,12 +96,27 @@ else:
     ):
         errors.append("MinIO must map 127.0.0.1:9000 to container TCP port 9000")
     mounts = minio.get("volumes", [])
-    if not isinstance(mounts, list) or len(mounts) != 1 or not isinstance(mounts[0], dict) or not (
-        mounts[0].get("type") == "volume"
-        and mounts[0].get("source") == "frameops-minio-data"
-        and mounts[0].get("target") == "/data"
-    ):
-        errors.append("MinIO must mount frameops-minio-data at /data")
+    expected_fifo_mounts = {
+        "/run/secrets/minio-root-user": os.environ["FRAMEOPS_MINIO_ROOT_USER_FIFO"],
+        "/run/secrets/minio-root-password": os.environ["FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO"],
+    }
+    if not isinstance(mounts, list) or len(mounts) != 3:
+        errors.append("MinIO must mount its data volume and exactly two read-only root-secret FIFOs")
+    else:
+        data_mounts = [mount for mount in mounts if isinstance(mount, dict) and mount.get("target") == "/data"]
+        if len(data_mounts) != 1 or not (
+            data_mounts[0].get("type") == "volume"
+            and data_mounts[0].get("source") == "frameops-minio-data"
+        ):
+            errors.append("MinIO must mount frameops-minio-data at /data")
+        fifo_mounts = {mount.get("target"): mount for mount in mounts if isinstance(mount, dict) and mount.get("target") in expected_fifo_mounts}
+        if set(fifo_mounts) != set(expected_fifo_mounts) or any(
+            mount.get("type") != "bind"
+            or mount.get("source") != expected_fifo_mounts[target]
+            or mount.get("read_only") is not True
+            for target, mount in fifo_mounts.items()
+        ):
+            errors.append("MinIO root-secret FIFOs must be exclusive read-only bind mounts")
 
 if "frameops-minio-data" not in config.get("volumes", {}):
     errors.append("missing volumes.frameops-minio-data")
