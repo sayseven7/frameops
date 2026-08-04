@@ -97,7 +97,7 @@ FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO=$minio_password_fifo \
 docker compose --project-name "$project" --env-file "$environment" up -d postgres minio
 
 for attempt in {1..30}; do
-  if docker compose --project-name "$project" --env-file "$environment" exec -T postgres pg_isready -U frameops_local -d frameops_local >/dev/null && curl --fail --silent --output /dev/null http://127.0.0.1:19000/minio/health/live; then
+  if docker compose --project-name "$project" --env-file "$environment" exec -T postgres psql -U frameops_local -d frameops_local -c 'SELECT 1' >/dev/null && curl --fail --silent --output /dev/null http://127.0.0.1:19000/minio/health/live; then
     break
   fi
   if [[ $attempt == 30 ]]; then
