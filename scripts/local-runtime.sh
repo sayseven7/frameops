@@ -73,7 +73,7 @@ FRAMEOPS_EVIDENCE_S3_REGION=us-east-1
 FRAMEOPS_EVIDENCE_S3_ACCESS_KEY=$minio_user
 FRAMEOPS_EVIDENCE_S3_SECRET_KEY=$minio_password
 FRAMEOPS_OBJECT_RETENTION_DAYS=365
-FRAMEOPS_DATABASE_URL=postgres://frameops_local:$postgres_password@127.0.0.1:5432/frameops_local?sslmode=disable
+FRAMEOPS_DATABASE_URL=postgres://frameops_local:${postgres_password}@127.0.0.1:5432/frameops_local?sslmode=disable
 FRAMEOPS_HTTP_ADDR=127.0.0.1:8081
 FRAMEOPS_PDF_WORKER=$worker
 FRAMEOPS_API_URL=http://127.0.0.1:8081
