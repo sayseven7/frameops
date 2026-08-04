@@ -14,6 +14,11 @@ for required in 'umask 077' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'FRA
   fi
 done
 
+if grep -Fq 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:***@' "$script"; then
+  printf '%s must not use a masked database password\n' "$script" >&2
+  exit 1
+fi
+
 if grep -Eq 'printf.*(PASSWORD|SECRET|TOKEN)|cat.*(PASSWORD|SECRET|TOKEN)' "$script"; then
   printf '%s must not print secret material\n' "$script" >&2
   exit 1
