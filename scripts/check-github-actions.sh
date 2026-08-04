@@ -29,6 +29,7 @@ fi
 WORKFLOWS="$(printf '%s\n' "${workflows[@]}")" python3 - <<'PY'
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -45,6 +46,14 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
         errors.append(f"{prefix} pnpm commands require pinned pnpm/action-setup")
     for run in re.finditer(r"(?m)^(?P<indent>\s*)- run:\s*(?P<command>[^\n]*)$", text):
         step = re.split(rf"(?m)^{re.escape(run.group('indent'))}-\s", text[run.end():], maxsplit=1)[0]
+        command = run.group("command")
+        script = step if command in {"|", "|-", ">", ">-"} else command
+        try:
+            shell_tokens = shlex.split(script, comments=True)
+        except ValueError:
+            shell_tokens = []
+        if any("corepack" in token for token in shell_tokens):
+            errors.append(f"{prefix} corepack bootstrap is prohibited; use pinned pnpm/action-setup")
         if "pnpm" in run.group("command") + step and not re.fullmatch(r"pnpm [^;&|]+", run.group("command")):
             errors.append(f"{prefix} pnpm run steps must invoke pnpm directly")
     lines = text.splitlines()
