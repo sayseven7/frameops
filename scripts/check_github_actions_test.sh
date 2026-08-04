@@ -72,6 +72,10 @@ replacements = {
         "run: pnpm install --frozen-lockfile --ignore-scripts",
         "run: |\n          corepack enable\n          pnpm install --frozen-lockfile --ignore-scripts",
     ),
+    "quoted-corepack-bootstrap": (
+        "run: pnpm install --frozen-lockfile --ignore-scripts",
+        'run: co"repack" enable && pnpm install --frozen-lockfile --ignore-scripts',
+    ),
 }
 old, new = replacements[os.environ["MUTATION"]]
 replaced = False
@@ -125,7 +129,7 @@ expect_gitlink_rejection() {
 }
 
 bash "$root/scripts/check-github-actions.sh"
-for mutation in unpinned-action write-permission job-write-all-permission flow-style-permission quoted-write-permission tagged-write-permission anchored-write-permission aliased-write-permission escaped-write-permission unpinned-reusable-workflow quoted-uses flow-style-uses anchored-uses folded-uses pull-request-target quoted-pull-request-target checkout-credentials missing-timeout missing-concurrency missing-sarif-guard detached-sarif-guard renamed-sarif-workflow golangci-build-toolchain expression-sarif-guard corepack-bootstrap codeql-go-none trivy-sarif-gate trivy-missing-high-gate compound-corepack-bootstrap codeql-go-matrix-none conditional-trivy-gate codeql-init-expression-none conditional-trivy-job block-corepack-bootstrap; do
+for mutation in unpinned-action write-permission job-write-all-permission flow-style-permission quoted-write-permission tagged-write-permission anchored-write-permission aliased-write-permission escaped-write-permission unpinned-reusable-workflow quoted-uses flow-style-uses anchored-uses folded-uses pull-request-target quoted-pull-request-target checkout-credentials missing-timeout missing-concurrency missing-sarif-guard detached-sarif-guard renamed-sarif-workflow golangci-build-toolchain expression-sarif-guard corepack-bootstrap codeql-go-none trivy-sarif-gate trivy-missing-high-gate compound-corepack-bootstrap codeql-go-matrix-none conditional-trivy-gate codeql-init-expression-none conditional-trivy-job block-corepack-bootstrap quoted-corepack-bootstrap; do
   expect_rejection "$mutation"
 done
 expect_gitlink_rejection

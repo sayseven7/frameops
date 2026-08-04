@@ -43,6 +43,10 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
         errors.append(f"{prefix} corepack bootstrap is prohibited; use pinned pnpm/action-setup")
     if re.search(r"(?m)^\s*- run:.*\bpnpm\b", text) and "pnpm/action-setup@" not in text:
         errors.append(f"{prefix} pnpm commands require pinned pnpm/action-setup")
+    for run in re.finditer(r"(?m)^(?P<indent>\s*)- run:\s*(?P<command>[^\n]*)$", text):
+        step = re.split(rf"(?m)^{re.escape(run.group('indent'))}-\s", text[run.end():], maxsplit=1)[0]
+        if "pnpm" in run.group("command") + step and not re.fullmatch(r"pnpm [^;&|]+", run.group("command")):
+            errors.append(f"{prefix} pnpm run steps must invoke pnpm directly")
     lines = text.splitlines()
     permission_blocks = []
     for index, line in enumerate(lines):
