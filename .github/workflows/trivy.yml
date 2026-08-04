@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 concurrency:
   group: filesystem-scan-${{ github.workflow }}-${{ github.ref }}
@@ -18,6 +17,9 @@ concurrency:
 
 jobs:
   trivy:
+    permissions:
+      contents: read
+      security-events: write
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

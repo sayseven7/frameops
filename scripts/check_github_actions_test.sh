@@ -21,8 +21,17 @@ replacements = {
     "quoted-write-permission": ("contents: read", 'issues: "write"'),
     "tagged-write-permission": ("contents: read", "issues: !!str write"),
     "anchored-write-permission": ("contents: read", "issues: &scope write"),
-    "aliased-write-permission": ("contents: read\n  security-events: write", "security-events: &scope write\n  contents: *scope"),
+    "aliased-write-permission": ("    permissions:\n      contents: read\n      security-events: write", "    permissions:\n      security-events: &scope write\n      contents: *scope"),
     "escaped-write-permission": ("contents: read", 'contents: "\\x77rite"'),
+    "top-level-security-events-write": (
+        "permissions:\n  contents: read\n\nconcurrency:",
+        "permissions:\n  contents: read\n  security-events: write\n\nconcurrency:",
+    ),
+    "codeql-extra-id-token": (
+        "    permissions:\n      contents: read\n      security-events: write",
+        "    permissions:\n      contents: read\n      security-events: write\n      id-token: write",
+    ),
+    "new-job-security-events-write": ("name: CI", "name: CI"),
     "unpinned-reusable-workflow": ("name: Dependency review", "name: Dependency review"),
     "quoted-uses": ("- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "- 'uses': evil-org/evil-action@v1"),
     "flow-style-uses": ("      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          persist-credentials: false", "      - {uses: evil-org/evil-action@v1, with: {persist-credentials: false}}"),
@@ -65,8 +74,8 @@ replacements = {
         "build-mode: ${{ contains(matrix.language, 'go') && 'none' || matrix.build-mode }}",
     ),
     "conditional-trivy-job": (
-        "  trivy:\n    runs-on:",
-        "  trivy:\n    if: github.ref == 'refs/heads/never-run-this-gate'\n    runs-on:",
+        "  trivy:\n    permissions:",
+        "  trivy:\n    if: github.ref == 'refs/heads/never-run-this-gate'\n    permissions:",
     ),
     "block-corepack-bootstrap": (
         "run: pnpm install --frozen-lockfile --ignore-scripts",
@@ -97,6 +106,10 @@ for path in Path(os.environ["CASE_DIR"]).glob("*.yml"):
 if os.environ["MUTATION"] == "unpinned-reusable-workflow":
     path = Path(os.environ["CASE_DIR"]) / "dependency-review.yml"
     path.write_text(path.read_text() + "\n  reusable:\n    uses: evil-org/evil-workflow@v1\n")
+    replaced = True
+if os.environ["MUTATION"] == "new-job-security-events-write":
+    path = Path(os.environ["CASE_DIR"]) / "ci.yml"
+    path.write_text(path.read_text() + "\n  attacker:\n    permissions:\n      contents: read\n      security-events: write\n    runs-on: ubuntu-24.04\n    timeout-minutes: 1\n    steps:\n      - run: 'true'\n")
     replaced = True
 if os.environ["MUTATION"] == "renamed-sarif-workflow":
     path = Path(os.environ["CASE_DIR"]) / "trivy.yml"
@@ -137,7 +150,7 @@ expect_gitlink_rejection() {
 }
 
 bash "$root/scripts/check-github-actions.sh"
-for mutation in unpinned-action write-permission job-write-all-permission flow-style-permission quoted-write-permission tagged-write-permission anchored-write-permission aliased-write-permission escaped-write-permission unpinned-reusable-workflow quoted-uses flow-style-uses anchored-uses folded-uses pull-request-target quoted-pull-request-target checkout-credentials missing-timeout missing-concurrency missing-sarif-guard detached-sarif-guard renamed-sarif-workflow golangci-build-toolchain expression-sarif-guard corepack-bootstrap codeql-go-none trivy-sarif-gate trivy-missing-high-gate compound-corepack-bootstrap codeql-go-matrix-none conditional-trivy-gate codeql-init-expression-none conditional-trivy-job block-corepack-bootstrap quoted-corepack-bootstrap quoted-standalone-corepack substitution-corepack-bootstrap; do
+for mutation in unpinned-action write-permission job-write-all-permission flow-style-permission quoted-write-permission tagged-write-permission anchored-write-permission aliased-write-permission escaped-write-permission top-level-security-events-write codeql-extra-id-token new-job-security-events-write unpinned-reusable-workflow quoted-uses flow-style-uses anchored-uses folded-uses pull-request-target quoted-pull-request-target checkout-credentials missing-timeout missing-concurrency missing-sarif-guard detached-sarif-guard renamed-sarif-workflow golangci-build-toolchain expression-sarif-guard corepack-bootstrap codeql-go-none trivy-sarif-gate trivy-missing-high-gate compound-corepack-bootstrap codeql-go-matrix-none conditional-trivy-gate codeql-init-expression-none conditional-trivy-job block-corepack-bootstrap quoted-corepack-bootstrap quoted-standalone-corepack substitution-corepack-bootstrap; do
   expect_rejection "$mutation"
 done
 expect_gitlink_rejection

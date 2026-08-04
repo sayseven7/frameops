@@ -66,23 +66,52 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
                 errors.append(f"{prefix} permissions must use a block mapping")
     if not permission_blocks:
         errors.append(f"{prefix} missing workflow permissions")
+    allowed_job_permissions = {
+        ("codeql.yml", "analyze"): {("contents", "read"), ("security-events", "write")},
+        ("scorecard.yml", "analyze"): {("contents", "read"), ("id-token", "write"), ("security-events", "write")},
+        ("trivy.yml", "trivy"): {("contents", "read"), ("security-events", "write")},
+    }
     for start in permission_blocks:
+        top_level = not lines[start][0].isspace()
+        base_indent = len(lines[start]) - len(lines[start].lstrip())
         found_permission = False
+        entries = []
         for line in lines[start + 1:]:
             if not line.strip():
                 continue
-            if not re.match(r"[ \t]", line):
+            indent = len(line) - len(line.lstrip())
+            if indent <= base_indent:
                 break
+            if indent != base_indent + 2:
+                errors.append(f"{prefix} invalid permission entry")
+                continue
             permission = re.fullmatch(r"[ \t]+([A-Za-z0-9-]+): (read|none|write)", line)
             if not permission:
                 errors.append(f"{prefix} invalid permission entry")
                 continue
             found_permission = True
             scope, value = permission.groups()
+            entries.append((scope, value))
+            if top_level and scope != "contents":
+                errors.append(f"{prefix} top-level permissions must only grant contents: read")
+            if top_level and value != "read":
+                errors.append(f"{prefix} top-level contents permission must be read")
             if value == "write" and scope not in {"security-events", "id-token"}:
                 errors.append(f"{prefix} undue write permission: {scope}")
         if not found_permission:
             errors.append(f"{prefix} empty permissions block")
+        if not top_level:
+            job = next(
+                (
+                    match.group(1)
+                    for previous in reversed(lines[:start])
+                    if (match := re.fullmatch(rf" {{{base_indent - 2}}}([A-Za-z0-9_-]+):\s*", previous))
+                ),
+                "",
+            )
+            expected = allowed_job_permissions.get((path.name, job))
+            if expected is None or set(entries) != expected or len(entries) != len(expected):
+                errors.append(f"{prefix} job {job or '<unknown>'} must use its exact permission allowlist")
     if not re.search(r"(?m)^concurrency\s*:", text):
         errors.append(f"{prefix} missing concurrency")
     if not re.search(r"(?m)^\s+timeout-minutes\s*:\s*\d+\s*$", text):

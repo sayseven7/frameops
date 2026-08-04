@@ -1,0 +1,4 @@
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2026-11-02
+reason = "Only the unmaintained openpgp subpackages are affected; FrameOPS imports argon2 only, and govulncheck reports zero reachable vulnerabilities. Reassess before expiry."
