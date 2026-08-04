@@ -2,7 +2,7 @@
 set -euo pipefail
 
 state=${FRAMEOPS_LOCAL_STATE_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/frameops"}
-project=frameops-local
+project="frameops-local-$(printf '%s' "$state" | od -An -tx1 | tr -d ' \n')"
 umask 077
 mkdir -p "$state"
 chmod 700 "$state"
@@ -26,7 +26,7 @@ port_available() {
   ! ss -ltn "sport = :$1" | grep -q LISTEN
 }
 
-for port in 5432 9000 8081 3000; do
+for port in 15432 19000 18081 13000; do
   if ! port_available "$port"; then
     printf 'port %s is already listening; local runtime was not started\n' "$port" >&2
     exit 1
@@ -65,18 +65,19 @@ cat >"$environment" <<EOF
 FRAMEOPS_POSTGRES_USER=frameops_local
 FRAMEOPS_POSTGRES_PASSWORD=$postgres_password
 FRAMEOPS_POSTGRES_DB=frameops_local
-FRAMEOPS_POSTGRES_PORT=5432
-FRAMEOPS_MINIO_PORT=9000
-FRAMEOPS_EVIDENCE_S3_ENDPOINT=http://127.0.0.1:9000
+FRAMEOPS_POSTGRES_PORT=15432
+FRAMEOPS_MINIO_PORT=19000
+FRAMEOPS_EVIDENCE_S3_ENDPOINT=http://127.0.0.1:19000
 FRAMEOPS_EVIDENCE_S3_BUCKET=frameops-evidence-locked
 FRAMEOPS_EVIDENCE_S3_REGION=us-east-1
 FRAMEOPS_EVIDENCE_S3_ACCESS_KEY=$minio_user
 FRAMEOPS_EVIDENCE_S3_SECRET_KEY=$minio_password
 FRAMEOPS_OBJECT_RETENTION_DAYS=365
-FRAMEOPS_DATABASE_URL=postgres://frameops_local:${postgres_password}@127.0.0.1:5432/frameops_local?sslmode=disable
-FRAMEOPS_HTTP_ADDR=127.0.0.1:8081
+FRAMEOPS_DATABASE_URL=postgres://frameops_local:${postgres_password}@127.0.0.1:15432/frameops_local?sslmode=disable
+FRAMEOPS_HTTP_ADDR=127.0.0.1:18081
 FRAMEOPS_PDF_WORKER=$worker
-FRAMEOPS_API_URL=http://127.0.0.1:8081
+FRAMEOPS_API_URL=http://127.0.0.1:18081
+FRAMEOPS_UI_PORT=13000
 EOF
 chmod 600 "$environment"
 
@@ -96,7 +97,7 @@ FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO=$minio_password_fifo \
 docker compose --project-name "$project" --env-file "$environment" up -d postgres minio
 
 for attempt in {1..30}; do
-  if docker compose --project-name "$project" --env-file "$environment" exec -T postgres pg_isready -U frameops_local -d frameops_local >/dev/null && curl --fail --silent --output /dev/null http://127.0.0.1:9000/minio/health/live; then
+  if docker compose --project-name "$project" --env-file "$environment" exec -T postgres pg_isready -U frameops_local -d frameops_local >/dev/null && curl --fail --silent --output /dev/null http://127.0.0.1:19000/minio/health/live; then
     break
   fi
   if [[ $attempt == 30 ]]; then
@@ -131,7 +132,7 @@ FRAMEOPS_OBJECT_LOCK_PROOF=1 go test ./internal/store/objectstore -run '^TestMin
 "$api" >"$state/api.log" 2>&1 &
 echo $! >"$state/api.pid"
 for attempt in {1..30}; do
-  if curl --fail --silent --output /dev/null http://127.0.0.1:8081/health; then
+  if curl --fail --silent --output /dev/null http://127.0.0.1:18081/health; then
     break
   fi
   if [[ $attempt == 30 ]]; then
@@ -143,6 +144,6 @@ done
 
 # Keep Secure cookies in production mode. Browsers treat localhost as a secure
 # local context; the UI proxies same-origin /v1 to loopback API without CORS.
-FRAMEOPS_API_URL=http://127.0.0.1:8081 pnpm --filter @frameops/web dev -- --hostname 127.0.0.1 >"$state/web.log" 2>&1 &
+FRAMEOPS_API_URL=http://127.0.0.1:18081 pnpm --filter @frameops/web dev -- --hostname 127.0.0.1 --port "$FRAMEOPS_UI_PORT" >"$state/web.log" 2>&1 &
 echo $! >"$state/web.pid"
-printf 'local runtime started: API http://127.0.0.1:8081, UI http://localhost:3000\n'
+printf 'local runtime started: API http://127.0.0.1:18081, UI http://localhost:13000\n'
