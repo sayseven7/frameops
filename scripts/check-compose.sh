@@ -13,10 +13,20 @@ docker compose --env-file .env.example config --quiet
 RENDERED_COMPOSE="$rendered" python3 - <<'PY'
 import json
 import os
+import re
 import sys
 
 config = json.loads(os.environ["RENDERED_COMPOSE"])
 errors = []
+compose_source = open("compose.yaml").read()
+expected_fifo_sources = {
+    "/run/secrets/minio-root-user": "FRAMEOPS_MINIO_ROOT_USER_FIFO",
+    "/run/secrets/minio-root-password": "FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO",
+}
+for target, variable in expected_fifo_sources.items():
+    pattern = rf"(?m)^        source: \$\{{{variable}:[^}}\n]*\}}\n        target: {re.escape(target)}\n        read_only: true\n        bind:\n          create_host_path: false$"
+    if not re.search(pattern, compose_source):
+        errors.append(f"compose.yaml must bind {variable} read-only at {target} with create_host_path disabled")
 postgres = config.get("services", {}).get("postgres")
 if postgres is None:
     errors.append("missing services.postgres")
@@ -104,10 +114,9 @@ else:
             mount.get("type") != "bind"
             or mount.get("source") != expected_fifo_mounts[target]
             or mount.get("read_only") is not True
-            or mount.get("bind", {}).get("create_host_path") is not False
             for target, mount in fifo_mounts.items()
         ):
-            errors.append("MinIO root-secret FIFOs must be exclusive read-only bind mounts with create_host_path disabled")
+            errors.append("MinIO root-secret FIFOs must be exclusive read-only bind mounts")
 
 if "frameops-minio-data" not in config.get("volumes", {}):
     errors.append("missing volumes.frameops-minio-data")
