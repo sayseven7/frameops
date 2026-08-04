@@ -144,6 +144,6 @@ done
 
 # Keep Secure cookies in production mode. Browsers treat localhost as a secure
 # local context; the UI proxies same-origin /v1 to loopback API without CORS.
-FRAMEOPS_API_URL=http://127.0.0.1:18081 pnpm --filter @frameops/web dev -- --hostname 127.0.0.1 --port "$FRAMEOPS_UI_PORT" >"$state/web.log" 2>&1 &
+FRAMEOPS_API_URL=http://127.0.0.1:18081 pnpm --filter @frameops/web dev --hostname 127.0.0.1 --port "$FRAMEOPS_UI_PORT" >"$state/web.log" 2>&1 &
 echo $! >"$state/web.pid"
 printf 'local runtime started: API http://127.0.0.1:18081, UI http://localhost:13000\n'
