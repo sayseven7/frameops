@@ -41,6 +41,25 @@ replacements = {
     "renamed-sarif-workflow": ("if: always() && hashFiles('trivy-results.sarif') != ''", "if: always()"),
     "golangci-build-toolchain": ("GOTOOLCHAIN=go1.26.5 ", ""),
     "expression-sarif-guard": ("if: always() && hashFiles('trivy-results.sarif') != ''", "if: ${{ always() }}"),
+    "corepack-bootstrap": (
+        "      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10\n        with:\n          version: 10.30.0",
+        "      - run: corepack enable",
+    ),
+    "codeql-go-none": ("build-mode: ${{ matrix.build-mode }}", "build-mode: none"),
+    "trivy-sarif-gate": ("exit-code: '0'", "exit-code: '1'"),
+    "trivy-missing-high-gate": ("severity: HIGH,CRITICAL", "severity: LOW"),
+    "compound-corepack-bootstrap": (
+        "run: pnpm install --frozen-lockfile --ignore-scripts",
+        "run: corepack enable && pnpm install --frozen-lockfile --ignore-scripts",
+    ),
+    "codeql-go-matrix-none": (
+        "          - language: go\n            build-mode: autobuild",
+        "          - language: go\n            build-mode: none",
+    ),
+    "conditional-trivy-gate": (
+        "      - name: Enforce HIGH and CRITICAL findings\n        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
+        "      - name: Enforce HIGH and CRITICAL findings\n        if: github.ref == 'refs/heads/never-run-this-gate'\n        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
+    ),
 }
 old, new = replacements[os.environ["MUTATION"]]
 replaced = False
@@ -94,7 +113,7 @@ expect_gitlink_rejection() {
 }
 
 bash "$root/scripts/check-github-actions.sh"
-for mutation in unpinned-action write-permission job-write-all-permission flow-style-permission quoted-write-permission tagged-write-permission anchored-write-permission aliased-write-permission escaped-write-permission unpinned-reusable-workflow quoted-uses flow-style-uses anchored-uses folded-uses pull-request-target quoted-pull-request-target checkout-credentials missing-timeout missing-concurrency missing-sarif-guard detached-sarif-guard renamed-sarif-workflow golangci-build-toolchain expression-sarif-guard; do
+for mutation in unpinned-action write-permission job-write-all-permission flow-style-permission quoted-write-permission tagged-write-permission anchored-write-permission aliased-write-permission escaped-write-permission unpinned-reusable-workflow quoted-uses flow-style-uses anchored-uses folded-uses pull-request-target quoted-pull-request-target checkout-credentials missing-timeout missing-concurrency missing-sarif-guard detached-sarif-guard renamed-sarif-workflow golangci-build-toolchain expression-sarif-guard corepack-bootstrap codeql-go-none trivy-sarif-gate trivy-missing-high-gate compound-corepack-bootstrap codeql-go-matrix-none conditional-trivy-gate; do
   expect_rejection "$mutation"
 done
 expect_gitlink_rejection

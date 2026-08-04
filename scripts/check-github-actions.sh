@@ -39,6 +39,10 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
     prefix = f"{path}:"
     if "pull_request_target" in text:
         errors.append(f"{prefix} pull_request_target is prohibited")
+    if re.search(r"(?m)^\s*- run:.*\bcorepack\s+enable\b", text):
+        errors.append(f"{prefix} corepack bootstrap is prohibited; use pinned pnpm/action-setup")
+    if re.search(r"(?m)^\s*- run:.*\bpnpm\b", text) and "pnpm/action-setup@" not in text:
+        errors.append(f"{prefix} pnpm commands require pinned pnpm/action-setup")
     lines = text.splitlines()
     permission_blocks = []
     for index, line in enumerate(lines):
@@ -88,6 +92,12 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
     for install in re.finditer(r"(?m)^\s*- run: (.*go install github\.com/golangci/golangci-lint/[^\n]+)$", text):
         if not install.group(1).startswith("GOTOOLCHAIN=go1.26.5 "):
             errors.append(f"{prefix} golangci-lint must be built with Go 1.26.5")
+    for init in re.finditer(r"(?m)^(?P<indent>\s*)- uses: github/codeql-action/init@[^\s#]+[^\n]*", text):
+        step = re.split(rf"(?m)^{re.escape(init.group('indent'))}-\s", text[init.end():], maxsplit=1)[0]
+        if not re.search(r"(?m)^\s+- language:\s*go\s*\n\s+build-mode:\s*autobuild\s*$", text):
+            errors.append(f"{prefix} CodeQL Go matrix entry must use autobuild")
+        if re.search(r"(?m)^\s+- language:\s*go\s*$", text) and re.search(r"(?m)^\s+build-mode:\s*none\s*$", step):
+            errors.append(f"{prefix} CodeQL Go analysis cannot use build-mode none")
     for upload in re.finditer(
         r"(?m)^(?P<indent>\s*)- uses: github/codeql-action/upload-sarif@[^\s#]+[^\n]*",
         text,
@@ -99,6 +109,23 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
             expected = re.escape(indent + "  ") + rf"if: always\(\) && hashFiles\('{re.escape(sarif.group(1) if sarif else '')}'\) != ''"
             if sarif is None or not re.search(rf"(?m)^{expected}\s*$", step):
                 errors.append(f"{prefix} always-run SARIF upload must require its output file")
+    trivy_sarif = False
+    trivy_gate = False
+    for trivy in re.finditer(r"(?m)^(?P<indent>\s*)- (?:name:[^\n]*\n(?P=indent)  )?uses: aquasecurity/trivy-action@[^\s#]+[^\n]*", text):
+        step = re.split(rf"(?m)^{re.escape(trivy.group('indent'))}-\s", text[trivy.end():], maxsplit=1)[0]
+        if re.search(r"(?m)^\s+format:\s*sarif\s*$", step):
+            trivy_sarif = True
+            if not re.search(r"(?m)^\s+exit-code:\s*['\"]?0['\"]?\s*$", step):
+                errors.append(f"{prefix} Trivy SARIF reporting must not be the severity gate")
+        if (
+            re.search(r"(?m)^\s+format:\s*table\s*$", step)
+            and re.search(r"(?m)^\s+severity:\s*HIGH,CRITICAL\s*$", step)
+            and re.search(r"(?m)^\s+exit-code:\s*['\"]?1['\"]?\s*$", step)
+            and not re.search(r"(?m)^\s+if:\s*", step)
+        ):
+            trivy_gate = True
+    if trivy_sarif and not trivy_gate:
+        errors.append(f"{prefix} Trivy SARIF reporting requires a separate HIGH/CRITICAL gate")
 
 if errors:
     print("GitHub Actions contract check failed:", file=sys.stderr)
