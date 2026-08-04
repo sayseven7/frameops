@@ -7,7 +7,7 @@ if [[ ! -f $script ]]; then
   exit 1
 fi
 
-for required in 'umask 077' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:8081' 'FRAMEOPS_API_URL=http://127.0.0.1:8081' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:${postgres_password}@127.0.0.1:5432/frameops_local?sslmode=disable' 'go build -o "$worker" ./cmd/frameops-render' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"'; do
+for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state" | od -An -tx1 | tr -d '\'' \n'\'')"' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'FRAMEOPS_POSTGRES_PORT=15432' 'FRAMEOPS_MINIO_PORT=19000' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:18081' 'FRAMEOPS_API_URL=http://127.0.0.1:18081' 'FRAMEOPS_UI_PORT=13000' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:${postgres_password}@127.0.0.1:15432/frameops_local?sslmode=disable' 'go build -o "$worker" ./cmd/frameops-render' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"' 'pnpm --filter @frameops/web dev -- --hostname 127.0.0.1 --port "$FRAMEOPS_UI_PORT"'; do
   if ! grep -Fq "$required" "$script"; then
     printf '%s must contain %q\n' "$script" "$required" >&2
     exit 1
@@ -21,5 +21,34 @@ fi
 
 if grep -Eq 'printf.*(PASSWORD|SECRET|TOKEN)|cat.*(PASSWORD|SECRET|TOKEN)' "$script"; then
   printf '%s must not print secret material\n' "$script" >&2
+  exit 1
+fi
+
+for forbidden in 5432 9000 8081 3000; do
+  if grep -Eq "(FRAMEOPS_(POSTGRES|MINIO)_PORT|FRAMEOPS_HTTP_ADDR|FRAMEOPS_UI_PORT|FRAMEOPS_API_URL|127\\.0\\.0\\.1:)$forbidden" "$script"; then
+    printf '%s must not use shared port %s\n' "$script" "$forbidden" >&2
+    exit 1
+  fi
+done
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+mkdir "$work/bin" "$work/state"
+cat >"$work/bin/ss" <<'EOF'
+#!/bin/bash
+printf 'LISTEN\n'
+EOF
+cat >"$work/bin/docker" <<EOF
+#!/bin/bash
+: >"$work/docker-reached"
+EOF
+chmod 700 "$work/bin/ss" "$work/bin/docker"
+
+if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$work/state" bash "$script" >/dev/null 2>"$work/stderr"; then
+  printf '%s must reject a selected-port collision\n' "$script" >&2
+  exit 1
+fi
+if [[ -e $work/docker-reached ]] || ! grep -Fq 'port 15432 is already listening; local runtime was not started' "$work/stderr"; then
+  printf '%s must reject collisions before Docker is reached\n' "$script" >&2
   exit 1
 fi
