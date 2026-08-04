@@ -6,14 +6,30 @@ Install Go 1.26.5 or newer, Node.js 22.12.0 or newer, pnpm 10.x, Python 3.13 or 
 
 ## Quick start
 
-Copy the safe local placeholders and run the complete verification gate:
+Run the reproducible local runtime launcher:
 
 ```bash
-cp .env.example .env
-make check
+bash scripts/local-runtime.sh
 ```
 
-`.env` is local-only and is ignored by Git.
+It inventories the required ports, writes all state under `~/.local/state/frameops`
+(or `FRAMEOPS_LOCAL_STATE_DIR`) with a `0700` directory and `0600` files, starts
+digest-pinned loopback-only Compose services, migrates, builds the PDF worker,
+proves MinIO COMPLIANCE Object Lock rejects overwrite and delete, performs the
+single transactional bootstrap, and starts API `127.0.0.1:8081` and UI
+`localhost:3000`. It never prints generated secrets. The script refuses an
+occupied port, so it does not interfere with another local preview.
+
+The UI uses its same-origin `/v1` proxy. The API keeps its production `Secure`
+cookie; browsers treat `localhost` as a secure local context, so local use does
+not relax cookie flags or enable CORS. Use `http://localhost:3000`, not a remote
+host, for that flow.
+
+Run the complete verification gate separately:
+
+```bash
+make check
+```
 
 ## Quality checks
 

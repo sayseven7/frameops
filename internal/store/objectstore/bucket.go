@@ -112,6 +112,14 @@ func (bucket Bucket) EnsureBucket(ctx context.Context) error {
 	return bucket.verifyObjectLock(ctx)
 }
 
+// Ready verifies configured compliance retention without changing bucket state.
+func (bucket Bucket) Ready(ctx context.Context) error {
+	if bucket.retentionDays < 1 {
+		return errors.New("evidence object storage requires a positive retention period")
+	}
+	return bucket.verifyObjectLock(ctx)
+}
+
 // Put writes exactly size bytes under key. payloadSHA256 is the hex digest the
 // server computed over those bytes; the object store recomputes it and rejects
 // the request when the body it received differs, so a truncated or altered

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,14 +23,22 @@ type Server struct {
 	pool     *pgxpool.Pool
 	evidence objectstore.Bucket
 	renderer render.Worker
+	ready    func() error
 }
 
 func New(pool *pgxpool.Pool, evidence objectstore.Bucket, renderer render.Worker) http.Handler {
-	return Server{pool: pool, evidence: evidence, renderer: renderer}
+	return Server{pool: pool, evidence: evidence, renderer: renderer, ready: func() error {
+		if err := pool.Ping(context.Background()); err != nil {
+			return err
+		}
+		return evidence.Ready(context.Background())
+	}}
 }
 
 func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	switch {
+	case request.Method == http.MethodGet && request.URL.Path == "/health":
+		server.health(response)
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/session/login":
 		server.login(response, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/csrf":
@@ -71,6 +80,14 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 	default:
 		writeError(response, http.StatusNotFound, "not_found")
 	}
+}
+
+func (server Server) health(response http.ResponseWriter) {
+	if server.ready == nil || server.ready() != nil {
+		response.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	response.WriteHeader(http.StatusOK)
 }
 
 func (server Server) login(response http.ResponseWriter, request *http.Request) {
