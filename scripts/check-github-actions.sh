@@ -172,6 +172,10 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
             trivy_gate = True
     if trivy_sarif and not trivy_gate:
         errors.append(f"{prefix} Trivy SARIF reporting requires a separate HIGH/CRITICAL gate")
+    for gitleaks in re.finditer(r"(?m)^(?P<indent>\s*)- uses: gitleaks/gitleaks-action@[^\s#]+[^\n]*", text):
+        step = re.split(rf"(?m)^{re.escape(gitleaks.group('indent'))}-\s", text[gitleaks.end():], maxsplit=1)[0]
+        if not re.search(r"(?m)^\s+GITHUB_TOKEN:\s*\$\{\{ secrets\.GITHUB_TOKEN \}\}\s*$", step):
+            errors.append(f"{prefix} Gitleaks must receive the repository-scoped GITHUB_TOKEN")
 
 if errors:
     print("GitHub Actions contract check failed:", file=sys.stderr)
