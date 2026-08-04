@@ -1,12 +1,14 @@
 {
   "name": "@frameops/web",
   "private": true,
+  "type": "module",
   "version": "0.0.0",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint app --max-warnings=0",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test app/api.test.ts next.config.test.ts"
   },
   "dependencies": {
     "next": "16.2.12",
