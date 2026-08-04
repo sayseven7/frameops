@@ -2,7 +2,7 @@
 set -euo pipefail
 
 state=${FRAMEOPS_LOCAL_STATE_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/frameops"}
-project="frameops-local-$(printf '%s' "$state" | od -An -tx1 | tr -d ' \n')"
+project="frameops-local-$(printf '%s' "$state" | sha256sum | cut -d ' ' -f1)"
 umask 077
 mkdir -p "$state"
 chmod 700 "$state"
@@ -18,7 +18,7 @@ require() {
   }
 }
 
-for command in docker go pnpm curl od ss base64; do
+for command in docker go pnpm curl od ss base64 sha256sum; do
   require "$command"
 done
 
