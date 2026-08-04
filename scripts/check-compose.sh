@@ -7,8 +7,8 @@ export FRAMEOPS_MINIO_ROOT_USER_FIFO="$fifo_dir/minio-root-user"
 export FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO="$fifo_dir/minio-root-password"
 mkfifo "$FRAMEOPS_MINIO_ROOT_USER_FIFO" "$FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO"
 
-rendered=$(DOCKER_CONFIG=/home/sayseven/.docker docker compose --env-file .env.example config --format json)
-DOCKER_CONFIG=/home/sayseven/.docker docker compose --env-file .env.example config --quiet
+rendered=$(docker compose --env-file .env.example config --format json)
+docker compose --env-file .env.example config --quiet
 
 RENDERED_COMPOSE="$rendered" python3 - <<'PY'
 import json
