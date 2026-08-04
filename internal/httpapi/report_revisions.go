@@ -55,11 +55,11 @@ func (server Server) reportRevisions(response http.ResponseWriter, request *http
 }
 
 func (server Server) importReportRevision(response http.ResponseWriter, request *http.Request, session postgres.Session, engagementID string) {
-	upload, err := readReportUpload(request)
+	upload, err := readReportUpload(response, request)
 	if upload.file != nil {
 		defer func() { _ = upload.file.Close(); _ = os.Remove(upload.file.Name()) }()
 	}
-	if errors.Is(err, errReportTooLarge) {
+	if errors.Is(err, errReportTooLarge) || errors.Is(err, errMultipartBodyTooLarge) {
 		writeError(response, http.StatusRequestEntityTooLarge, "report_too_large")
 		return
 	}
@@ -111,11 +111,12 @@ func (server Server) approveReportRevision(response http.ResponseWriter, request
 	}
 }
 
-func readReportUpload(request *http.Request) (reportUpload, error) {
-	parts, err := request.MultipartReader()
+func readReportUpload(response http.ResponseWriter, request *http.Request) (upload reportUpload, err error) {
+	parts, err := readMultipart(response, request, maxReportBytes)
 	if err != nil {
 		return reportUpload{}, err
 	}
+	defer func() { err = normalizeMultipartError(request, err) }()
 	part, err := parts.NextPart()
 	if err != nil || part.FormName() != "file" || part.FileName() == "" {
 		return reportUpload{}, errors.New("a report requires one file part")
@@ -129,7 +130,7 @@ func readReportUpload(request *http.Request) (reportUpload, error) {
 	if err != nil {
 		return reportUpload{}, err
 	}
-	upload := reportUpload{file: file, filename: filename}
+	upload = reportUpload{file: file, filename: filename}
 	failed := true
 	defer func() {
 		if failed {

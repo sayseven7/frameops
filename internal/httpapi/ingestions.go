@@ -55,9 +55,9 @@ func (server Server) ingestions(response http.ResponseWriter, request *http.Requ
 // produced, and an artifact that cannot be parsed is refused without recording
 // anything: there is no partially imported scan.
 func (server Server) recordIngestion(response http.ResponseWriter, request *http.Request, session postgres.Session, engagementID string) {
-	upload, err := readIngestionUpload(request)
+	upload, err := readIngestionUpload(response, request)
 	switch {
-	case errors.Is(err, errArtifactTooLarge):
+	case errors.Is(err, errArtifactTooLarge), errors.Is(err, errMultipartBodyTooLarge):
 		writeError(response, http.StatusRequestEntityTooLarge, "artifact_too_large")
 		return
 	case err != nil:
@@ -102,12 +102,12 @@ type ingestionUpload struct {
 // readIngestionUpload accepts one multipart import with a required `tool` field
 // and a required `file` part. Only the tools this build actually parses are
 // accepted; an unsupported tool is refused before its bytes are read.
-func readIngestionUpload(request *http.Request) (ingestionUpload, error) {
-	parts, err := request.MultipartReader()
+func readIngestionUpload(response http.ResponseWriter, request *http.Request) (upload ingestionUpload, err error) {
+	parts, err := readMultipart(response, request, maxIngestionBytes)
 	if err != nil {
 		return ingestionUpload{}, err
 	}
-	var upload ingestionUpload
+	defer func() { err = normalizeMultipartError(request, err) }()
 	for {
 		part, err := parts.NextPart()
 		if errors.Is(err, io.EOF) {

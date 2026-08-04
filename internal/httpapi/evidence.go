@@ -64,7 +64,7 @@ func (server Server) findingEvidence(response http.ResponseWriter, request *http
 // reservation leaves a pending row and possibly an orphan object, both of which
 // remain reconcilable; this is not, and is never reported as, one atomic write.
 func (server Server) captureEvidence(response http.ResponseWriter, request *http.Request, session postgres.Session, findingID string) {
-	upload, err := readEvidenceUpload(request)
+	upload, err := readEvidenceUpload(response, request)
 	if upload.file != nil {
 		defer func() {
 			_ = upload.file.Close()
@@ -72,7 +72,7 @@ func (server Server) captureEvidence(response http.ResponseWriter, request *http
 		}()
 	}
 	switch {
-	case errors.Is(err, errEvidenceTooLarge):
+	case errors.Is(err, errEvidenceTooLarge), errors.Is(err, errMultipartBodyTooLarge):
 		writeError(response, http.StatusRequestEntityTooLarge, "evidence_too_large")
 		return
 	case err != nil:
@@ -112,12 +112,12 @@ type evidenceUpload struct {
 // and an optional `capturedAt` field. The client-reported capture instant is
 // kept distinct from the instant the server receives the bytes, which the
 // database records on its own.
-func readEvidenceUpload(request *http.Request) (evidenceUpload, error) {
-	parts, err := request.MultipartReader()
+func readEvidenceUpload(response http.ResponseWriter, request *http.Request) (upload evidenceUpload, err error) {
+	parts, err := readMultipart(response, request, maxEvidenceBytes)
 	if err != nil {
 		return evidenceUpload{}, err
 	}
-	var upload evidenceUpload
+	defer func() { err = normalizeMultipartError(request, err) }()
 	for {
 		part, err := parts.NextPart()
 		if errors.Is(err, io.EOF) {
