@@ -93,6 +93,10 @@ replacements = {
         "run: pnpm install --frozen-lockfile --ignore-scripts",
         'run: pnpm install "$(co"repack" enable)" --frozen-lockfile --ignore-scripts',
     ),
+    "gitleaks-missing-token": (
+        "        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+        "",
+    ),
 }
 old, new = replacements[os.environ["MUTATION"]]
 replaced = False
@@ -150,7 +154,7 @@ expect_gitlink_rejection() {
 }
 
 bash "$root/scripts/check-github-actions.sh"
-for mutation in unpinned-action write-permission job-write-all-permission flow-style-permission quoted-write-permission tagged-write-permission anchored-write-permission aliased-write-permission escaped-write-permission top-level-security-events-write codeql-extra-id-token new-job-security-events-write unpinned-reusable-workflow quoted-uses flow-style-uses anchored-uses folded-uses pull-request-target quoted-pull-request-target checkout-credentials missing-timeout missing-concurrency missing-sarif-guard detached-sarif-guard renamed-sarif-workflow golangci-build-toolchain expression-sarif-guard corepack-bootstrap codeql-go-none trivy-sarif-gate trivy-missing-high-gate compound-corepack-bootstrap codeql-go-matrix-none conditional-trivy-gate codeql-init-expression-none conditional-trivy-job block-corepack-bootstrap quoted-corepack-bootstrap quoted-standalone-corepack substitution-corepack-bootstrap; do
+for mutation in unpinned-action write-permission job-write-all-permission flow-style-permission quoted-write-permission tagged-write-permission anchored-write-permission aliased-write-permission escaped-write-permission top-level-security-events-write codeql-extra-id-token new-job-security-events-write unpinned-reusable-workflow quoted-uses flow-style-uses anchored-uses folded-uses pull-request-target quoted-pull-request-target checkout-credentials missing-timeout missing-concurrency missing-sarif-guard detached-sarif-guard renamed-sarif-workflow golangci-build-toolchain expression-sarif-guard corepack-bootstrap codeql-go-none trivy-sarif-gate trivy-missing-high-gate compound-corepack-bootstrap codeql-go-matrix-none conditional-trivy-gate codeql-init-expression-none conditional-trivy-job block-corepack-bootstrap quoted-corepack-bootstrap quoted-standalone-corepack substitution-corepack-bootstrap gitleaks-missing-token; do
   expect_rejection "$mutation"
 done
 expect_gitlink_rejection
