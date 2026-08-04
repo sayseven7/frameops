@@ -21,6 +21,17 @@ make check
 
 Individual commands are available through `make fmt`, `make lint`, `make test`, and `make web-check`.
 
+## Web portfolio
+
+The web app calls its same-origin `/v1` routes and keeps the session cookie in the browser. Configure the Next.js reverse proxy with the non-secret API origin before starting or building the web app:
+
+```bash
+export FRAMEOPS_API_URL=https://frameops.example.test
+pnpm --filter @frameops/web dev
+```
+
+Keeping the browser same-origin avoids enabling CORS for the secure session cookie. `FRAMEOPS_API_URL` is required and must be an HTTP(S) origin; the web build fails explicitly when it is absent or invalid. The app has local pt-BR and English labels; it does not contain a fallback API address or sample portfolio data.
+
 ## Local PostgreSQL
 
 Start the development PostgreSQL and MinIO dependencies with:
