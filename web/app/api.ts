@@ -72,6 +72,10 @@ export type RetestInput = Pick<Retest, "round" | "resultState" | "procedure" | "
 
 type Fetcher = typeof fetch;
 
+export function collectionItems<T>(collection: { items: T[] | null }): T[] {
+  return collection.items ?? [];
+}
+
 export async function requestJSON<T>(
   path: string,
   init: RequestInit = {},
