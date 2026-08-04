@@ -2,8 +2,10 @@ package objectstore
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -102,15 +104,51 @@ func TestMinIOObjectLockProof(t *testing.T) {
 	if err := bucket.Put(context.Background(), key, strings.NewReader(payload), int64(len(payload)), digest, "application/test"); err != nil {
 		t.Fatalf("put protected object: %v", err)
 	}
+	response, err := bucket.send(context.Background(), http.MethodGet, key, "", nil, 0, emptyPayloadHash, nil)
+	if err != nil {
+		t.Fatalf("get protected object version: %v", err)
+	}
+	versionID := response.Header.Get("X-Amz-Version-Id")
+	if response.StatusCode != http.StatusOK || versionID == "" {
+		drain(response)
+		t.Fatalf("get protected object = %s with version ID %q", response.Status, versionID)
+	}
+	drain(response)
 	if err := bucket.Put(context.Background(), key, strings.NewReader(payload), int64(len(payload)), digest, "application/test"); err == nil {
 		t.Fatal("overwrite was accepted")
 	}
-	response, err := bucket.send(context.Background(), http.MethodDelete, key, "", nil, 0, emptyPayloadHash, nil)
+	response, err = bucket.send(context.Background(), http.MethodDelete, key, "versionId="+url.QueryEscape(versionID), nil, 0, emptyPayloadHash, nil)
+	if err != nil {
+		t.Fatalf("delete protected object version request: %v", err)
+	}
+	if response.StatusCode < http.StatusBadRequest {
+		drain(response)
+		t.Fatalf("delete protected object version status = %s, want refusal", response.Status)
+	}
+	drain(response)
+	response, err = bucket.send(context.Background(), http.MethodDelete, key, "", nil, 0, emptyPayloadHash, nil)
 	if err != nil {
 		t.Fatalf("delete protected object request: %v", err)
 	}
-	defer drain(response)
-	if response.StatusCode < http.StatusBadRequest {
-		t.Fatalf("delete protected object status = %s, want refusal", response.Status)
+	if response.StatusCode != http.StatusNoContent || response.Header.Get("X-Amz-Delete-Marker") != "true" {
+		drain(response)
+		t.Fatalf("delete protected object = %s with delete marker %q, want 204 with delete marker", response.Status, response.Header.Get("X-Amz-Delete-Marker"))
+	}
+	drain(response)
+	response, err = bucket.send(context.Background(), http.MethodGet, key, "versionId="+url.QueryEscape(versionID), nil, 0, emptyPayloadHash, nil)
+	if err != nil {
+		t.Fatalf("get protected object version after delete marker: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		drain(response)
+		t.Fatalf("get protected object version after delete marker = %s", response.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, int64(len(payload))+1))
+	drain(response)
+	if err != nil {
+		t.Fatalf("read protected object version after delete marker: %v", err)
+	}
+	if string(body) != payload {
+		t.Fatalf("protected object version body = %q, want %q", body, payload)
 	}
 }
