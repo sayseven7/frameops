@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createEngagement, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, requestJSON, triageFinding } from "./api.ts";
+import { collectionItems, createEngagement, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, requestJSON, triageFinding } from "./api.ts";
 import { apiErrorMessage } from "./copy.ts";
 
 test("requestJSON keeps the session and sends CSRF for a mutating request", async () => {
@@ -73,4 +73,8 @@ test("apiErrorMessage localizes invalid finding state and CVSS errors", () => {
   assert.equal(apiErrorMessage("invalid_cvss_vector", "en"), "Enter a valid CVSS 3.1 vector.");
   assert.equal(apiErrorMessage("invalid_state", "pt-BR"), "O estado atual não permite esta operação.");
   assert.equal(apiErrorMessage("invalid_state", "en"), "The current state does not allow this operation.");
+});
+
+test("collectionItems normalizes null items to an empty collection", () => {
+  assert.deepEqual(collectionItems<{ id: string }>({ items: null }), []);
 });

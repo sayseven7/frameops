@@ -2,10 +2,10 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-import { createEngagement as createEngagementRequest, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Finding, type FindingInput, type Methodology, type MethodologyInput, type Retest, type RetestInput, requestJSON } from "./api";
+import { collectionItems, createEngagement as createEngagementRequest, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Finding, type FindingInput, type Methodology, type MethodologyInput, type Retest, type RetestInput, requestJSON } from "./api";
 import { apiErrorMessage, copy, type Locale } from "./copy";
 
-type Collection<T> = { items: T[] };
+type Collection<T> = { items: T[] | null };
 
 export default function HomePage() {
   const [locale, setLocale] = useState<Locale>("pt-BR");
@@ -37,19 +37,19 @@ export default function HomePage() {
   }, [error]);
 
   async function loadEngagements(id: string) {
-    setEngagements((await requestJSON<Collection<Engagement>>(`/v1/clients/${encodeURIComponent(id)}/engagements`)).items);
+    setEngagements(collectionItems(await requestJSON<Collection<Engagement>>(`/v1/clients/${encodeURIComponent(id)}/engagements`)));
   }
 
   async function loadFindings(id: string) {
-    setFindings((await requestJSON<Collection<Finding>>(`/v1/engagements/${encodeURIComponent(id)}/findings`)).items);
+    setFindings(collectionItems(await requestJSON<Collection<Finding>>(`/v1/engagements/${encodeURIComponent(id)}/findings`)));
   }
 
   async function loadRetests(id: string) {
-    setRetests((await requestJSON<Collection<Retest>>(`/v1/findings/${encodeURIComponent(id)}/retests`)).items);
+    setRetests(collectionItems(await requestJSON<Collection<Retest>>(`/v1/findings/${encodeURIComponent(id)}/retests`)));
   }
 
   async function loadMethodologies() {
-    setMethodologies((await requestJSON<Collection<Methodology>>("/v1/methodology-templates")).items);
+    setMethodologies(collectionItems(await requestJSON<Collection<Methodology>>("/v1/methodology-templates")));
   }
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
@@ -60,7 +60,7 @@ export default function HomePage() {
       await requestJSON<void>("/v1/session/login", { method: "POST", body: JSON.stringify({ email, password }) });
       const token = await requestJSON<{ token: string }>("/v1/csrf");
       setCSRF(token.token);
-      setClients((await requestJSON<Collection<Client>>("/v1/clients")).items);
+      setClients(collectionItems(await requestJSON<Collection<Client>>("/v1/clients")));
       await loadMethodologies();
       setPassword("");
     } catch (reason) {
