@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
@@ -98,6 +99,7 @@ func TestReadNmapReportRefusesUnacceptedArtifacts(t *testing.T) {
 		"empty":            "",
 		"not xml":          "{\"hosts\":[]}",
 		"truncated":        `<nmaprun scanner="nmap"><host><status state="up"/>`,
+		"trailing data":    scanReport + `attacker-controlled trailing bytes`,
 		"another scanner":  `<nmaprun scanner="masscan" version="1.3"><host><status state="up"/><address addr="198.51.100.30" addrtype="ipv4"/></host></nmaprun>`,
 		"another document": `<scanreport><host addr="198.51.100.31"/></scanreport>`,
 		"unknown entity":   `<!DOCTYPE nmaprun [<!ENTITY payload SYSTEM "file:///etc/passwd">]><nmaprun scanner="nmap" version="7.94">&payload;</nmaprun>`,
@@ -109,4 +111,27 @@ func TestReadNmapReportRefusesUnacceptedArtifacts(t *testing.T) {
 			t.Fatalf("%s artifact was accepted, want a refusal", name)
 		}
 	}
+}
+
+func FuzzReadNmapReport(f *testing.F) {
+	f.Add([]byte(scanReport))
+	f.Add([]byte(scanReport + `attacker-controlled trailing bytes`))
+	f.Add([]byte(`<nmaprun scanner="nmap"><host><status state="up"/><address addr="198.51.100.1" addrtype="ipv4"/></host></nmaprun>`))
+	f.Add([]byte(`<!DOCTYPE nmaprun><nmaprun scanner="nmap"/>`))
+	f.Fuzz(func(t *testing.T, artifact []byte) {
+		report, err := readNmapReport(strings.NewReader(string(artifact)))
+		if err != nil {
+			return
+		}
+		if report.Read > maxIngestionHosts || report.Read != len(report.Names)+report.Ignored+report.Rejected {
+			t.Fatalf("invalid accepted summary: %#v", report)
+		}
+		seen := make(map[string]bool, len(report.Names))
+		for _, name := range report.Names {
+			if seen[name] || !domainName(name) && net.ParseIP(name) == nil {
+				t.Fatalf("invalid accepted asset name %q in %#v", name, report)
+			}
+			seen[name] = true
+		}
+	})
 }
