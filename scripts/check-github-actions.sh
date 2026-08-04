@@ -39,7 +39,7 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
     prefix = f"{path}:"
     if "pull_request_target" in text:
         errors.append(f"{prefix} pull_request_target is prohibited")
-    if re.search(r"(?m)^\s*- run:.*\bcorepack\s+enable\b", text):
+    if re.search(r"\bcorepack\s+enable\b", text):
         errors.append(f"{prefix} corepack bootstrap is prohibited; use pinned pnpm/action-setup")
     if re.search(r"(?m)^\s*- run:.*\bpnpm\b", text) and "pnpm/action-setup@" not in text:
         errors.append(f"{prefix} pnpm commands require pinned pnpm/action-setup")
@@ -96,6 +96,8 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
         step = re.split(rf"(?m)^{re.escape(init.group('indent'))}-\s", text[init.end():], maxsplit=1)[0]
         if not re.search(r"(?m)^\s+- language:\s*go\s*\n\s+build-mode:\s*autobuild\s*$", text):
             errors.append(f"{prefix} CodeQL Go matrix entry must use autobuild")
+        if not re.search(r"(?m)^\s+build-mode:\s*\$\{\{\s*matrix\.build-mode\s*\}\}\s*$", step):
+            errors.append(f"{prefix} CodeQL init must use the matrix build mode directly")
         if re.search(r"(?m)^\s+- language:\s*go\s*$", text) and re.search(r"(?m)^\s+build-mode:\s*none\s*$", step):
             errors.append(f"{prefix} CodeQL Go analysis cannot use build-mode none")
     for upload in re.finditer(
@@ -111,6 +113,8 @@ for name in filter(None, os.environ["WORKFLOWS"].splitlines()):
                 errors.append(f"{prefix} always-run SARIF upload must require its output file")
     trivy_sarif = False
     trivy_gate = False
+    if "aquasecurity/trivy-action@" in text and re.search(r"(?m)^    if:\s*", text):
+        errors.append(f"{prefix} Trivy job must be unconditional")
     for trivy in re.finditer(r"(?m)^(?P<indent>\s*)- (?:name:[^\n]*\n(?P=indent)  )?uses: aquasecurity/trivy-action@[^\s#]+[^\n]*", text):
         step = re.split(rf"(?m)^{re.escape(trivy.group('indent'))}-\s", text[trivy.end():], maxsplit=1)[0]
         if re.search(r"(?m)^\s+format:\s*sarif\s*$", step):
