@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createFinding, recordRetest, requestJSON, triageFinding } from "./api.ts";
+import { createEngagement, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, requestJSON, triageFinding } from "./api.ts";
 import { apiErrorMessage } from "./copy.ts";
 
 test("requestJSON keeps the session and sends CSRF for a mutating request", async () => {
@@ -44,6 +44,27 @@ test("finding mutations keep the session and send CSRF to their existing API rou
     ["https://frameops.example.test/v1/engagements/engagement-id/findings", "POST", "csrf-token", "include"],
     ["https://frameops.example.test/v1/findings/finding-id/triage", "PUT", "csrf-token", "include"],
     ["https://frameops.example.test/v1/findings/finding-id/retests", "POST", "csrf-token", "include"],
+  ]);
+});
+
+test("methodology and engagement requests use their API routes and CSRF", async () => {
+  const requests: Request[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push(new Request(new URL(input.toString(), "https://frameops.example.test"), init));
+    return Response.json({ id: "result-id" }, { status: 201 });
+  };
+  const methodology = { name: "Web", sourceName: "OWASP WSTG", sourceVersion: "4.2", attribution: "Structured after OWASP WSTG.", items: [{ title: "Authorization", objective: "Verify access", procedure: "Replay request" }] };
+
+  await createMethodology(methodology, "csrf-token", fetcher);
+  await publishMethodology("template-id", "csrf-token", fetcher);
+  await createEngagement("client-id", { name: "Q1", methodologyVersionId: "version-id" }, "csrf-token", fetcher);
+  await readEngagementChecklist("engagement-id", fetcher);
+
+  assert.deepEqual(requests.map((request) => [request.url, request.method, request.headers.get("X-CSRF-Token"), request.credentials]), [
+    ["https://frameops.example.test/v1/methodology-templates", "POST", "csrf-token", "include"],
+    ["https://frameops.example.test/v1/methodology-templates/template-id/publish", "POST", "csrf-token", "include"],
+    ["https://frameops.example.test/v1/clients/client-id/engagements", "POST", "csrf-token", "include"],
+    ["https://frameops.example.test/v1/engagements/engagement-id/checklist", "GET", null, "include"],
   ]);
 });
 
