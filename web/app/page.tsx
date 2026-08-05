@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-import { captureEvidence, collectionItems, createEngagement as createEngagementRequest, createFinding, createMethodology, publishMethodology, readEvidence, readEngagementChecklist, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Evidence, type Finding, type FindingInput, type Methodology, type MethodologyInput, type Retest, type RetestInput, requestJSON } from "./api";
+import { approveReportRevision, captureEvidence, collectionItems, createEngagement as createEngagementRequest, createFinding, createMethodology, deriveReportPDF, publishMethodology, readEvidence, readEngagementChecklist, readReportRevisions, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Evidence, type Finding, type FindingInput, type Methodology, type MethodologyInput, type ReportPDF, type ReportRevision, type Retest, type RetestInput, requestJSON, uploadReportRevision } from "./api";
 import { apiErrorMessage, copy, type Locale } from "./copy";
 
 type Collection<T> = { items: T[] | null };
@@ -18,6 +18,9 @@ export default function HomePage() {
   const [retests, setRetests] = useState<Retest[]>([]);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [evidenceFile, setEvidenceFile] = useState<File>();
+  const [reports, setReports] = useState<ReportRevision[]>([]);
+  const [reportFile, setReportFile] = useState<File>();
+  const [reportPDFs, setReportPDFs] = useState<ReportPDF[]>([]);
   const [methodologies, setMethodologies] = useState<Methodology[]>([]);
   const [checklist, setChecklist] = useState<EngagementChecklist>();
   const [clientID, setClientID] = useState("");
@@ -29,7 +32,7 @@ export default function HomePage() {
   const [methodologyInput, setMethodologyInput] = useState<MethodologyInput>({ name: "", sourceName: "", sourceVersion: "", attribution: "", items: [{ title: "", objective: "", procedure: "" }] });
   const [findingInput, setFindingInput] = useState<FindingInput>({ title: "", description: "", impact: "", remediation: "", reproduction: "", cvssVector: "" });
   const [retestInput, setRetestInput] = useState<Omit<RetestInput, "round">>({ resultState: "open", procedure: "", observedResult: "", justification: "" });
-  const [busy, setBusy] = useState<"login" | "client" | "methodology" | "publish" | "engagement" | "finding" | "triage" | "retest" | "evidence" | "">("");
+  const [busy, setBusy] = useState<"login" | "client" | "methodology" | "publish" | "engagement" | "finding" | "triage" | "retest" | "evidence" | "report" | "approve" | "pdf" | "">("");
   const [error, setError] = useState("");
   const errorRef = useRef<HTMLParagraphElement>(null);
   const findingIDRef = useRef("");
@@ -54,6 +57,10 @@ export default function HomePage() {
   async function loadEvidence(id: string) {
     const items = collectionItems(await readEvidence(id));
     if (findingIDRef.current === id) setEvidence(items);
+  }
+
+  async function loadReports(id: string) {
+    setReports(collectionItems(await readReportRevisions(id)));
   }
 
   async function loadMethodologies() {
@@ -90,6 +97,9 @@ export default function HomePage() {
       setRetests([]);
       setEvidence([]);
       setEvidenceFile(undefined);
+      setReports([]);
+      setReportFile(undefined);
+      setReportPDFs([]);
       return;
     }
     try {
@@ -106,13 +116,16 @@ export default function HomePage() {
     setRetests([]);
     setEvidence([]);
     setEvidenceFile(undefined);
+    setReports([]);
+    setReportFile(undefined);
+    setReportPDFs([]);
     setError("");
     if (!id) {
       setFindings([]);
       return;
     }
     try {
-      await loadFindings(id);
+      await Promise.all([loadFindings(id), loadReports(id)]);
     } catch (reason) {
       setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
     }
@@ -271,6 +284,50 @@ export default function HomePage() {
     }
   }
 
+  async function submitReport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!engagementID || !reportFile) return;
+    setBusy("report");
+    setError("");
+    try {
+      const report = await uploadReportRevision(engagementID, reportFile, csrf);
+      setReports((current) => [...current, report]);
+      setReportFile(undefined);
+      form.reset();
+    } catch (reason) {
+      setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function approveReport(revisionID: string) {
+    setBusy("approve");
+    setError("");
+    try {
+      const report = await approveReportRevision(revisionID, csrf);
+      setReports((current) => current.map((item) => item.id === report.id ? report : item));
+    } catch (reason) {
+      setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function derivePDF(revisionID: string) {
+    setBusy("pdf");
+    setError("");
+    try {
+      const pdf = await deriveReportPDF(revisionID, csrf);
+      setReportPDFs((current) => [...current, pdf]);
+    } catch (reason) {
+      setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
+    } finally {
+      setBusy("");
+    }
+  }
+
   const signedIn = Boolean(csrf);
   const selectedFinding = findings.find((finding) => finding.id === findingID);
 
@@ -362,6 +419,16 @@ export default function HomePage() {
             <section className="panel" aria-labelledby="checklist-title">
               <h2 id="checklist-title">{text.checklist}</h2>
               {checklist ? <><p>{checklist.name} v{checklist.versionNumber} — {checklist.sourceName} {checklist.sourceVersion}</p><ul>{checklist.items.map((item) => <li key={item.position}>{item.title}: {item.objective} — {item.procedure}</li>)}</ul></> : <p>{text.noChecklist}</p>}
+            </section>
+            <section className="panel" aria-labelledby="reports-title">
+              <h2 id="reports-title">{text.reports}</h2>
+              <form onSubmit={submitReport}>
+                <label htmlFor="report-file">{text.reportFile}</label>
+                <input id="report-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setReportFile(event.target.files?.[0])} disabled={!engagementID || busy === "report"} required />
+                <button type="submit" disabled={!engagementID || !reportFile || busy === "report"}>{busy === "report" ? text.uploadingReport : text.uploadReport}</button>
+              </form>
+              <ul aria-live="polite">{reports.map((report) => <li key={report.id}>{report.filename} — {report.state} — {report.sha256} — {report.byteSize} {report.state === "stored" && !report.approvedAt && <button type="button" onClick={() => void approveReport(report.id)} disabled={busy === "approve"}>{busy === "approve" ? text.approvingReport : text.approveReport}</button>} {report.approvedAt && <button type="button" onClick={() => void derivePDF(report.id)} disabled={busy === "pdf"}>{busy === "pdf" ? text.derivingPDF : text.derivePDF}</button>} {reportPDFs.filter((pdf) => pdf.revisionId === report.id).map((pdf) => <p key={pdf.id}>{text.derivedPDF} — {pdf.state} — {pdf.sourceSha256} — {pdf.sha256} — {pdf.byteSize}</p>)}</li>)}</ul>
+              {engagementID && !reports.length && <p>{text.noReports}</p>}
             </section>
             <section className="panel" aria-labelledby="findings-title">
               <h2 id="findings-title">{text.findings}</h2>

@@ -78,6 +78,24 @@ export type Evidence = {
   byteSize: number;
 };
 
+export type ReportRevision = {
+  id: string;
+  filename: string;
+  state: string;
+  sha256: string;
+  byteSize: number;
+  approvedAt: string | null;
+};
+
+export type ReportPDF = {
+  id: string;
+  revisionId: string;
+  state: string;
+  sourceSha256: string;
+  sha256: string;
+  byteSize: number;
+};
+
 type Fetcher = typeof fetch;
 
 export function collectionItems<T>(collection: { items: T[] | null }): T[] {
@@ -138,4 +156,22 @@ export function createEngagement(clientID: string, input: EngagementInput, csrf:
 
 export function readEngagementChecklist(engagementID: string, fetcher?: Fetcher) {
   return requestJSON<EngagementChecklist>(`/v1/engagements/${encodeURIComponent(engagementID)}/checklist`, {}, undefined, fetcher);
+}
+
+export function readReportRevisions(engagementID: string, fetcher?: Fetcher) {
+  return requestJSON<{ items: ReportRevision[] | null }>(`/v1/engagements/${encodeURIComponent(engagementID)}/reports`, {}, undefined, fetcher);
+}
+
+export function uploadReportRevision(engagementID: string, file: File, csrf: string, fetcher?: Fetcher) {
+  const form = new FormData();
+  form.append("file", file);
+  return requestJSON<ReportRevision>(`/v1/engagements/${encodeURIComponent(engagementID)}/reports`, { method: "POST", body: form }, csrf, fetcher);
+}
+
+export function approveReportRevision(revisionID: string, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<ReportRevision>(`/v1/report-revisions/${encodeURIComponent(revisionID)}/approve`, { method: "POST" }, csrf, fetcher);
+}
+
+export function deriveReportPDF(revisionID: string, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<ReportPDF>(`/v1/report-revisions/${encodeURIComponent(revisionID)}/pdf`, { method: "POST" }, csrf, fetcher);
 }

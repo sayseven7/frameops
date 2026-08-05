@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, requestJSON, triageFinding } from "./api.ts";
+import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, deriveReportPDF, publishMethodology, readEngagementChecklist, readReportRevisions, recordRetest, requestJSON, triageFinding, uploadReportRevision } from "./api.ts";
 import { apiErrorMessage } from "./copy.ts";
 
 test("requestJSON keeps the session and sends CSRF for a mutating request", async () => {
@@ -97,4 +97,30 @@ test("apiErrorMessage localizes invalid finding state and CVSS errors", () => {
 
 test("collectionItems normalizes null items to an empty collection", () => {
   assert.deepEqual(collectionItems<{ id: string }>({ items: null }), []);
+});
+
+test("report revision adapters list, upload, approve, and derive with the session and CSRF", async () => {
+  const requests: Request[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    const request = new Request(new URL(input.toString(), "https://frameops.example.test"), init);
+    requests.push(request);
+    if (request.method === "GET") return Response.json({ items: [{ id: "revision-id", filename: "report.docx", state: "stored", sha256: "docx-digest", byteSize: 7, approvedAt: null }] });
+    if (request.url.endsWith("/pdf")) return Response.json({ id: "pdf-id", revisionId: "revision-id", state: "stored", sourceSha256: "docx-digest", sha256: "pdf-digest", byteSize: 9 }, { status: 201 });
+    return Response.json({ id: "revision-id", filename: "report.docx", state: "stored", sha256: "docx-digest", byteSize: 7, approvedAt: "2026-08-04T00:00:00Z" }, { status: request.url.endsWith("/approve") ? 200 : 201 });
+  };
+
+  await readReportRevisions("engagement-id", fetcher);
+  await uploadReportRevision("engagement-id", new File(["report"], "report.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }), "csrf-token", fetcher);
+  await approveReportRevision("revision-id", "csrf-token", fetcher);
+  await deriveReportPDF("revision-id", "csrf-token", fetcher);
+
+  assert.deepEqual(requests.map((request) => [request.url, request.method, request.headers.get("X-CSRF-Token"), request.credentials]), [
+    ["https://frameops.example.test/v1/engagements/engagement-id/reports", "GET", null, "include"],
+    ["https://frameops.example.test/v1/engagements/engagement-id/reports", "POST", "csrf-token", "include"],
+    ["https://frameops.example.test/v1/report-revisions/revision-id/approve", "POST", "csrf-token", "include"],
+    ["https://frameops.example.test/v1/report-revisions/revision-id/pdf", "POST", "csrf-token", "include"],
+  ]);
+  assert.match(requests[1].headers.get("Content-Type") ?? "", /^multipart\/form-data; boundary=/);
+  assert.notEqual(requests[1].headers.get("Content-Type"), "application/json");
+  assert.equal((await requests[1].formData()).get("file") instanceof File, true);
 });
