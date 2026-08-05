@@ -70,6 +70,14 @@ export type Retest = {
 
 export type RetestInput = Pick<Retest, "round" | "resultState" | "procedure" | "observedResult" | "justification">;
 
+export type Evidence = {
+  id: string;
+  state: string;
+  filename: string;
+  sha256: string;
+  byteSize: number;
+};
+
 type Fetcher = typeof fetch;
 
 export function collectionItems<T>(collection: { items: T[] | null }): T[] {
@@ -83,7 +91,7 @@ export async function requestJSON<T>(
   fetcher: Fetcher = fetch,
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (csrf) headers.set("X-CSRF-Token", csrf);
 
   const response = await fetcher(path, { ...init, credentials: "include", headers });
@@ -104,6 +112,16 @@ export function triageFinding(findingID: string, csrf: string, fetcher?: Fetcher
 
 export function recordRetest(findingID: string, input: RetestInput, csrf: string, fetcher?: Fetcher) {
   return requestJSON<Retest>(`/v1/findings/${encodeURIComponent(findingID)}/retests`, { method: "POST", body: JSON.stringify(input) }, csrf, fetcher);
+}
+
+export function captureEvidence(findingID: string, file: File, csrf: string, fetcher?: Fetcher) {
+  const form = new FormData();
+  form.append("file", file);
+  return requestJSON<Evidence>(`/v1/findings/${encodeURIComponent(findingID)}/evidence`, { method: "POST", body: form }, csrf, fetcher);
+}
+
+export function readEvidence(findingID: string, fetcher?: Fetcher) {
+  return requestJSON<{ items: Evidence[] | null }>(`/v1/findings/${encodeURIComponent(findingID)}/evidence`, {}, undefined, fetcher);
 }
 
 export function createMethodology(input: MethodologyInput, csrf: string, fetcher?: Fetcher) {

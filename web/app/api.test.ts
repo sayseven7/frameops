@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { collectionItems, createEngagement, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, requestJSON, triageFinding } from "./api.ts";
+import { captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, requestJSON, triageFinding } from "./api.ts";
 import { apiErrorMessage } from "./copy.ts";
 
 test("requestJSON keeps the session and sends CSRF for a mutating request", async () => {
@@ -47,6 +47,24 @@ test("finding mutations keep the session and send CSRF to their existing API rou
   ]);
 });
 
+test("evidence capture sends one multipart file with the session and CSRF", async () => {
+  let request: Request | undefined;
+  const fetcher: typeof fetch = async (input, init) => {
+    request = new Request(new URL(input.toString(), "https://frameops.example.test"), init);
+    return Response.json({ id: "evidence-id", state: "stored", filename: "capture.txt", sha256: "digest", byteSize: 7 }, { status: 201 });
+  };
+
+  await captureEvidence("finding-id", new File(["capture"], "capture.txt", { type: "text/plain" }), "csrf-token", fetcher);
+
+  assert.equal(request?.url, "https://frameops.example.test/v1/findings/finding-id/evidence");
+  assert.equal(request?.method, "POST");
+  assert.equal(request?.credentials, "include");
+  assert.equal(request?.headers.get("X-CSRF-Token"), "csrf-token");
+  assert.match(request?.headers.get("Content-Type") ?? "", /^multipart\/form-data; boundary=/);
+  assert.notEqual(request?.headers.get("Content-Type"), "application/json");
+  assert.equal((await request?.formData()).get("file") instanceof File, true);
+});
+
 test("methodology and engagement requests use their API routes and CSRF", async () => {
   const requests: Request[] = [];
   const fetcher: typeof fetch = async (input, init) => {
@@ -73,6 +91,8 @@ test("apiErrorMessage localizes invalid finding state and CVSS errors", () => {
   assert.equal(apiErrorMessage("invalid_cvss_vector", "en"), "Enter a valid CVSS 3.1 vector.");
   assert.equal(apiErrorMessage("invalid_state", "pt-BR"), "O estado atual não permite esta operação.");
   assert.equal(apiErrorMessage("invalid_state", "en"), "The current state does not allow this operation.");
+  assert.equal(apiErrorMessage("evidence_too_large", "pt-BR"), "O arquivo de evidência excede o limite de 32 MiB.");
+  assert.equal(apiErrorMessage("evidence_too_large", "en"), "The evidence file exceeds the 32 MiB limit.");
 });
 
 test("collectionItems normalizes null items to an empty collection", () => {
