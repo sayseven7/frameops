@@ -8,7 +8,7 @@
     "build": "next build",
     "lint": "eslint app --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "test": "node --test app/api.test.ts next.config.test.ts"
+    "test": "node --test app/api.test.ts app/operations.test.ts next.config.test.ts"
   },
   "dependencies": {
     "next": "16.2.12",
