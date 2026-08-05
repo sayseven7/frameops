@@ -51,6 +51,7 @@ cat >"$work/bin/docker" <<EOF
 #!/bin/bash
 : >"$work/docker-reached"
 EOF
+ln -s /bin/true "$work/bin/pnpm"
 chmod 700 "$work/bin/ss" "$work/bin/docker"
 
 if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$long_state" bash "$script" >/dev/null 2>"$work/stderr"; then
