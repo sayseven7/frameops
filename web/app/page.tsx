@@ -6,7 +6,7 @@ import { approveReportRevision, captureEvidence, collectionItems, createEngageme
 import { apiErrorMessage, copy, type Locale } from "./copy";
 
 type Collection<T> = { items: T[] | null };
-type Section = "overview" | "clients" | "projects" | "methodologies" | "findings" | "evidence" | "reports" | "integrations";
+type Section = "overview" | "clients" | "projects" | "methodologies" | "findings" | "evidence" | "reports";
 
 export default function HomePage() {
   const [locale, setLocale] = useState<Locale>("pt-BR");
@@ -37,12 +37,17 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [section, setSection] = useState<Section>("overview");
   const errorRef = useRef<HTMLParagraphElement>(null);
+  const contentRef = useRef<HTMLElement>(null);
   const findingIDRef = useRef("");
   const text = copy[locale];
 
   useEffect(() => {
     if (error) errorRef.current?.focus();
   }, [error]);
+
+  useEffect(() => {
+    if (csrf) contentRef.current?.focus();
+  }, [csrf, section]);
 
   async function loadEngagements(id: string) {
     setEngagements(collectionItems(await requestJSON<Collection<Engagement>>(`/v1/clients/${encodeURIComponent(id)}/engagements`)));
@@ -90,18 +95,19 @@ export default function HomePage() {
   async function selectClient(id: string) {
     setClientID(id);
     setError("");
+    setEngagements([]);
+    setEngagementID("");
+    setChecklist(undefined);
+    setFindings([]);
+    setFindingID("");
+    findingIDRef.current = "";
+    setRetests([]);
+    setEvidence([]);
+    setEvidenceFile(undefined);
+    setReports([]);
+    setReportFile(undefined);
+    setReportPDFs([]);
     if (!id) {
-      setEngagements([]);
-      setEngagementID("");
-      setFindings([]);
-      setFindingID("");
-      findingIDRef.current = "";
-      setRetests([]);
-      setEvidence([]);
-      setEvidenceFile(undefined);
-      setReports([]);
-      setReportFile(undefined);
-      setReportPDFs([]);
       return;
     }
     try {
@@ -113,6 +119,8 @@ export default function HomePage() {
 
   async function selectEngagement(id: string) {
     setEngagementID(id);
+    setChecklist(undefined);
+    setFindings([]);
     setFindingID("");
     findingIDRef.current = "";
     setRetests([]);
@@ -123,7 +131,6 @@ export default function HomePage() {
     setReportPDFs([]);
     setError("");
     if (!id) {
-      setFindings([]);
       return;
     }
     try {
@@ -338,7 +345,7 @@ export default function HomePage() {
   const navigation: { id: Section; label: string }[] = [
     { id: "overview", label: text.overview }, { id: "clients", label: text.clients }, { id: "projects", label: text.projects },
     { id: "methodologies", label: text.methodologies }, { id: "findings", label: text.findings }, { id: "evidence", label: text.evidence },
-    { id: "reports", label: text.reports }, { id: "integrations", label: text.integrations },
+    { id: "reports", label: text.reports },
   ];
 
   return (
@@ -368,7 +375,7 @@ export default function HomePage() {
           <nav>{navigation.map((item) => <button key={item.id} type="button" className={section === item.id ? "active" : ""} aria-current={section === item.id ? "page" : undefined} onClick={() => setSection(item.id)}>{item.label}</button>)}</nav>
           <label><span>{text.language}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}><option value="pt-BR">{text.portuguese}</option><option value="en">{text.english}</option></select></label>
         </aside>
-        <section className="app-content">
+        <section className="app-content" ref={contentRef} tabIndex={-1} aria-label={navigation.find((item) => item.id === section)?.label}>
           <header className="context-bar"><div><span>{text.engagementContext}</span><strong>{selectedClient?.name ?? text.selectClient} / {selectedEngagement?.name ?? text.selectEngagement}</strong></div><p aria-live="polite">{busy ? text.loadingWorkspace : text.sessionReady}</p></header>
           {error && <p className="error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
           {section === "overview" && <section className="workbench" aria-labelledby="overview-title"><div><h1 id="overview-title">{text.workspace}</h1><p>{text.workbenchDescription}</p></div><div className="context-selectors"><label htmlFor="workspace-client">{text.clientContext}</label><select id="workspace-client" value={clientID} onChange={(event) => void selectClient(event.target.value)}><option value="">{text.selectClient}</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><label htmlFor="workspace-engagement">{text.projectContext}</label><select id="workspace-engagement" value={engagementID} onChange={(event) => void selectEngagement(event.target.value)} disabled={!clientID}><option value="">{text.selectEngagement}</option>{engagements.map((engagement) => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}</select></div><div className="workbench-summary"><h2>{text.workbench}</h2><p>{engagementID ? text.projectSummary : text.noEngagementSelected}</p></div></section>}
@@ -461,8 +468,21 @@ export default function HomePage() {
               </select>
               {engagementID && !findings.length && <p>{text.noFindings}</p>}
             </section>}
-          {section === "evidence" && <section className="surface" aria-labelledby="retests-title">
-              <h2 id="retests-title">{text.retests}</h2>
+          {section === "evidence" && <section className="surface" aria-labelledby="evidence-title">
+              <h2 id="evidence-title">{text.evidence}</h2>
+              <label htmlFor="evidence-finding-select">{text.selectFinding}</label>
+              <select id="evidence-finding-select" value={findingID} onChange={(event) => void selectFinding(event.target.value)} disabled={!engagementID}>
+                <option value="">{text.selectFinding}</option>
+                {findings.map((finding) => <option key={finding.id} value={finding.id}>{finding.title} — {text.score} {finding.cvssScore}</option>)}
+              </select>
+              <form onSubmit={submitEvidence}>
+                <label htmlFor="evidence-file">{text.evidenceFile}</label>
+                <input id="evidence-file" type="file" onChange={(event) => setEvidenceFile(event.target.files?.[0])} disabled={!findingID || busy === "evidence"} required />
+                <button type="submit" disabled={!findingID || !evidenceFile || busy === "evidence"}>{busy === "evidence" ? text.capturingEvidence : text.captureEvidence}</button>
+              </form>
+              <ul aria-live="polite">{evidence.map((item) => <li key={item.id}>{item.filename} — {item.state} — {item.sha256} — {item.byteSize}</li>)}</ul>
+              {findingID && !evidence.length && <p>{text.noEvidence}</p>}
+              <div className="secondary-surface"><h3>{text.retests}</h3>
               {selectedFinding?.validationState === "new" && <button type="button" onClick={() => void confirmFinding()} disabled={busy === "triage"}>{busy === "triage" ? text.confirmingFinding : text.confirmFinding}</button>}
               <form onSubmit={submitRetest}>
                 <label htmlFor="retest-result">{text.resultState}</label>
@@ -479,16 +499,8 @@ export default function HomePage() {
               </form>
               <ul aria-live="polite">{retests.map((retest) => <li key={retest.id}>#{retest.round}: {retest.previousState} → {retest.resultState}</li>)}</ul>
               {findingID && !retests.length && <p>{text.noRetests}</p>}
-              <h3>{text.evidence}</h3>
-              <form onSubmit={submitEvidence}>
-                <label htmlFor="evidence-file">{text.evidenceFile}</label>
-                <input id="evidence-file" type="file" onChange={(event) => setEvidenceFile(event.target.files?.[0])} disabled={!findingID || busy === "evidence"} required />
-                <button type="submit" disabled={!findingID || !evidenceFile || busy === "evidence"}>{busy === "evidence" ? text.capturingEvidence : text.captureEvidence}</button>
-              </form>
-              <ul aria-live="polite">{evidence.map((item) => <li key={item.id}>{item.filename} — {item.state} — {item.sha256} — {item.byteSize}</li>)}</ul>
-              {findingID && !evidence.length && <p>{text.noEvidence}</p>}
+              </div>
             </section>}
-          {section === "integrations" && <section className="surface integration-surface" aria-labelledby="integrations-title"><h2 id="integrations-title">{text.integrations}</h2><h3>{text.cliTitle}</h3><p>{text.cliDescription}</p><p>{text.integrationDescription}</p></section>}
         </section>
       </>}
     </main>
