@@ -80,6 +80,18 @@ export const copy = {
     noMethodologySelected: "Selecione uma metodologia publicada antes de criar um engagement.",
     checklist: "Checklist do engagement",
     noChecklist: "Nenhum checklist selecionado.",
+    reports: "Relatórios",
+    reportFile: "Arquivo DOCX",
+    uploadReport: "Enviar relatório",
+    uploadingReport: "Enviando relatório…",
+    approveReport: "Aprovar revisão",
+    approvingReport: "Aprovando revisão…",
+    derivePDF: "Derivar PDF",
+    derivingPDF: "Derivando PDF…",
+    noReports: "Nenhuma revisão de relatório enviada.",
+    derivedPDF: "PDF derivado",
+    errorReportTooLarge: "O relatório excede o limite de 32 MiB.",
+    errorConversionFailed: "Não foi possível derivar o PDF. Tente novamente.",
   },
   en: {
     language: "Language",
@@ -162,6 +174,18 @@ export const copy = {
     noMethodologySelected: "Select a published methodology before creating an engagement.",
     checklist: "Engagement checklist",
     noChecklist: "No checklist selected.",
+    reports: "Reports",
+    reportFile: "DOCX file",
+    uploadReport: "Upload report",
+    uploadingReport: "Uploading report…",
+    approveReport: "Approve revision",
+    approvingReport: "Approving revision…",
+    derivePDF: "Derive PDF",
+    derivingPDF: "Deriving PDF…",
+    noReports: "No report revisions uploaded.",
+    derivedPDF: "Derived PDF",
+    errorReportTooLarge: "The report exceeds the 32 MiB limit.",
+    errorConversionFailed: "We could not derive the PDF. Try again.",
   },
 } as const;
 
@@ -181,6 +205,10 @@ export function apiErrorMessage(code: string, locale: Locale) {
       return text.errorInvalidState;
     case "evidence_too_large":
       return text.errorEvidenceTooLarge;
+    case "report_too_large":
+      return text.errorReportTooLarge;
+    case "conversion_failed":
+      return text.errorConversionFailed;
     case "forbidden":
       return text.errorForbidden;
     case "not_found":
