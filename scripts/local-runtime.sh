@@ -26,7 +26,7 @@ port_available() {
   ! ss -ltn "sport = :$1" | grep -q LISTEN
 }
 
-for port in 15432 19000 18081 13000; do
+for port in 15432 19000 8081 3000; do
   if ! port_available "$port"; then
     printf 'port %s is already listening; local runtime was not started\n' "$port" >&2
     exit 1
@@ -73,11 +73,11 @@ FRAMEOPS_EVIDENCE_S3_REGION=us-east-1
 FRAMEOPS_EVIDENCE_S3_ACCESS_KEY=$minio_user
 FRAMEOPS_EVIDENCE_S3_SECRET_KEY=$minio_password
 FRAMEOPS_OBJECT_RETENTION_DAYS=365
-FRAMEOPS_DATABASE_URL=postgres://frameops_local:${postgres_password}@127.0.0.1:15432/frameops_local?sslmode=disable
-FRAMEOPS_HTTP_ADDR=127.0.0.1:18081
+FRAMEOPS_DATABASE_URL=postgres://frameops_local:$postgres_password@127.0.0.1:15432/frameops_local?sslmode=disable
+FRAMEOPS_HTTP_ADDR=127.0.0.1:8081
 FRAMEOPS_PDF_WORKER=$worker
-FRAMEOPS_API_URL=http://127.0.0.1:18081
-FRAMEOPS_UI_PORT=13000
+FRAMEOPS_API_URL=http://127.0.0.1:8081
+FRAMEOPS_UI_PORT=3000
 EOF
 chmod 600 "$environment"
 
@@ -132,7 +132,7 @@ FRAMEOPS_OBJECT_LOCK_PROOF=1 go test ./internal/store/objectstore -run '^TestMin
 "$api" >"$state/api.log" 2>&1 &
 echo $! >"$state/api.pid"
 for attempt in {1..30}; do
-  if curl --fail --silent --output /dev/null http://127.0.0.1:18081/health; then
+  if curl --fail --silent --output /dev/null http://127.0.0.1:8081/health; then
     break
   fi
   if [[ $attempt == 30 ]]; then
@@ -144,6 +144,7 @@ done
 
 # Keep Secure cookies in production mode. Browsers treat localhost as a secure
 # local context; the UI proxies same-origin /v1 to loopback API without CORS.
-FRAMEOPS_API_URL=http://127.0.0.1:18081 pnpm --filter @frameops/web dev --hostname 127.0.0.1 --port "$FRAMEOPS_UI_PORT" >"$state/web.log" 2>&1 &
+FRAMEOPS_API_URL=http://127.0.0.1:8081 pnpm --filter @frameops/web build
+pnpm --filter @frameops/web exec next start --hostname 127.0.0.1 --port "$FRAMEOPS_UI_PORT" >"$state/web.log" 2>&1 &
 echo $! >"$state/web.pid"
-printf 'local runtime started: API http://127.0.0.1:18081, UI http://localhost:13000\n'
+printf 'local runtime started: API http://127.0.0.1:8081, UI http://localhost:3000\n'

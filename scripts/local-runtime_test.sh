@@ -7,7 +7,7 @@ if [[ ! -f $script ]]; then
   exit 1
 fi
 
-for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state" | sha256sum | cut -d '\'' '\'' -f1)"' 'for command in docker go pnpm curl od ss base64 sha256sum; do' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'FRAMEOPS_POSTGRES_PORT=15432' 'FRAMEOPS_MINIO_PORT=19000' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:18081' 'FRAMEOPS_API_URL=http://127.0.0.1:18081' 'FRAMEOPS_UI_PORT=13000' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:${postgres_password}@127.0.0.1:15432/frameops_local?sslmode=disable' 'go build -o "$worker" ./cmd/frameops-render' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"' 'psql -U frameops_local -d frameops_local -c '\''SELECT 1'\''' 'pnpm --filter @frameops/web dev --hostname 127.0.0.1 --port "$FRAMEOPS_UI_PORT"'; do
+for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state" | sha256sum | cut -d '\'' '\'' -f1)"' 'for command in docker go pnpm curl od ss base64 sha256sum; do' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'FRAMEOPS_POSTGRES_PORT=15432' 'FRAMEOPS_MINIO_PORT=19000' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:$postgres_password@127.0.0.1:15432/frameops_local?sslmode=disable' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:8081' 'FRAMEOPS_API_URL=http://127.0.0.1:8081' 'FRAMEOPS_UI_PORT=3000' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'go build -o "$worker" ./cmd/frameops-render' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"' 'psql -U frameops_local -d frameops_local -c '\''SELECT 1'\''' 'FRAMEOPS_API_URL=http://127.0.0.1:8081 pnpm --filter @frameops/web build' 'pnpm --filter @frameops/web exec next start --hostname 127.0.0.1 --port "$FRAMEOPS_UI_PORT"'; do
   if ! grep -Fq "$required" "$script"; then
     printf '%s must contain %q\n' "$script" "$required" >&2
     exit 1
@@ -24,7 +24,7 @@ if grep -Eq 'printf.*(PASSWORD|SECRET|TOKEN)|cat.*(PASSWORD|SECRET|TOKEN)' "$scr
   exit 1
 fi
 
-for forbidden in 5432 9000 8081 3000; do
+for forbidden in 5432 9000 18081 13000; do
   if grep -Eq "(FRAMEOPS_(POSTGRES|MINIO)_PORT|FRAMEOPS_HTTP_ADDR|FRAMEOPS_UI_PORT|FRAMEOPS_API_URL|127\\.0\\.0\\.1:)$forbidden" "$script"; then
     printf '%s must not use shared port %s\n' "$script" "$forbidden" >&2
     exit 1
