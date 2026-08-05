@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-import { collectionItems, createEngagement as createEngagementRequest, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Finding, type FindingInput, type Methodology, type MethodologyInput, type Retest, type RetestInput, requestJSON } from "./api";
+import { captureEvidence, collectionItems, createEngagement as createEngagementRequest, createFinding, createMethodology, publishMethodology, readEvidence, readEngagementChecklist, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Evidence, type Finding, type FindingInput, type Methodology, type MethodologyInput, type Retest, type RetestInput, requestJSON } from "./api";
 import { apiErrorMessage, copy, type Locale } from "./copy";
 
 type Collection<T> = { items: T[] | null };
@@ -16,6 +16,8 @@ export default function HomePage() {
   const [engagements, setEngagements] = useState<Engagement[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [retests, setRetests] = useState<Retest[]>([]);
+  const [evidence, setEvidence] = useState<Evidence[]>([]);
+  const [evidenceFile, setEvidenceFile] = useState<File>();
   const [methodologies, setMethodologies] = useState<Methodology[]>([]);
   const [checklist, setChecklist] = useState<EngagementChecklist>();
   const [clientID, setClientID] = useState("");
@@ -27,9 +29,10 @@ export default function HomePage() {
   const [methodologyInput, setMethodologyInput] = useState<MethodologyInput>({ name: "", sourceName: "", sourceVersion: "", attribution: "", items: [{ title: "", objective: "", procedure: "" }] });
   const [findingInput, setFindingInput] = useState<FindingInput>({ title: "", description: "", impact: "", remediation: "", reproduction: "", cvssVector: "" });
   const [retestInput, setRetestInput] = useState<Omit<RetestInput, "round">>({ resultState: "open", procedure: "", observedResult: "", justification: "" });
-  const [busy, setBusy] = useState<"login" | "client" | "methodology" | "publish" | "engagement" | "finding" | "triage" | "retest" | "">("");
+  const [busy, setBusy] = useState<"login" | "client" | "methodology" | "publish" | "engagement" | "finding" | "triage" | "retest" | "evidence" | "">("");
   const [error, setError] = useState("");
   const errorRef = useRef<HTMLParagraphElement>(null);
+  const findingIDRef = useRef("");
   const text = copy[locale];
 
   useEffect(() => {
@@ -46,6 +49,11 @@ export default function HomePage() {
 
   async function loadRetests(id: string) {
     setRetests(collectionItems(await requestJSON<Collection<Retest>>(`/v1/findings/${encodeURIComponent(id)}/retests`)));
+  }
+
+  async function loadEvidence(id: string) {
+    const items = collectionItems(await readEvidence(id));
+    if (findingIDRef.current === id) setEvidence(items);
   }
 
   async function loadMethodologies() {
@@ -78,7 +86,10 @@ export default function HomePage() {
       setEngagementID("");
       setFindings([]);
       setFindingID("");
+      findingIDRef.current = "";
       setRetests([]);
+      setEvidence([]);
+      setEvidenceFile(undefined);
       return;
     }
     try {
@@ -91,7 +102,10 @@ export default function HomePage() {
   async function selectEngagement(id: string) {
     setEngagementID(id);
     setFindingID("");
+    findingIDRef.current = "";
     setRetests([]);
+    setEvidence([]);
+    setEvidenceFile(undefined);
     setError("");
     if (!id) {
       setFindings([]);
@@ -106,13 +120,17 @@ export default function HomePage() {
 
   async function selectFinding(id: string) {
     setFindingID(id);
+    findingIDRef.current = id;
+    setEvidenceFile(undefined);
     setError("");
     if (!id) {
       setRetests([]);
+      setEvidence([]);
+      setEvidenceFile(undefined);
       return;
     }
     try {
-      await loadRetests(id);
+      await Promise.all([loadRetests(id), loadEvidence(id)]);
     } catch (reason) {
       setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
     }
@@ -228,6 +246,24 @@ export default function HomePage() {
       setRetests((current) => [...current, retest]);
       setFindings((current) => current.map((item) => item.id === findingID ? { ...item, remediationState: retest.resultState } : item));
       setRetestInput({ resultState: "open", procedure: "", observedResult: "", justification: "" });
+    } catch (reason) {
+      setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function submitEvidence(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!findingID || !evidenceFile) return;
+    setBusy("evidence");
+    setError("");
+    try {
+      await captureEvidence(findingID, evidenceFile, csrf);
+      await loadEvidence(findingID);
+      setEvidenceFile(undefined);
+      form.reset();
     } catch (reason) {
       setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
     } finally {
@@ -369,6 +405,14 @@ export default function HomePage() {
               </form>
               <ul aria-live="polite">{retests.map((retest) => <li key={retest.id}>#{retest.round}: {retest.previousState} → {retest.resultState}</li>)}</ul>
               {findingID && !retests.length && <p>{text.noRetests}</p>}
+              <h3>{text.evidence}</h3>
+              <form onSubmit={submitEvidence}>
+                <label htmlFor="evidence-file">{text.evidenceFile}</label>
+                <input id="evidence-file" type="file" onChange={(event) => setEvidenceFile(event.target.files?.[0])} disabled={!findingID || busy === "evidence"} required />
+                <button type="submit" disabled={!findingID || !evidenceFile || busy === "evidence"}>{busy === "evidence" ? text.capturingEvidence : text.captureEvidence}</button>
+              </form>
+              <ul aria-live="polite">{evidence.map((item) => <li key={item.id}>{item.filename} — {item.state} — {item.sha256} — {item.byteSize}</li>)}</ul>
+              {findingID && !evidence.length && <p>{text.noEvidence}</p>}
             </section>
           </div>
         </section>

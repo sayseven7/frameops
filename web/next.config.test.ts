@@ -26,6 +26,7 @@ test("Next config rejects a remote HTTP FRAMEOPS_API_URL", async () => {
 test("Next config permits HTTP FRAMEOPS_API_URL on loopback", async () => {
   const config = await nextConfig("http://127.0.0.1:8080");
   assert.deepEqual(config.allowedDevOrigins, ["127.0.0.1", "localhost", "192.168.100.31"]);
+  assert.equal(config.experimental?.proxyClientMaxBodySize, "34mb");
   assert.deepEqual(await config.rewrites?.(), [{ source: "/v1/:path*", destination: "http://127.0.0.1:8080/v1/:path*" }]);
 });
 

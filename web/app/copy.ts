@@ -47,6 +47,11 @@ export const copy = {
     recordRetest: "Registrar reteste",
     recordingRetest: "Registrando reteste…",
     noRetests: "Nenhum reteste registrado.",
+    evidence: "Evidências",
+    evidenceFile: "Arquivo de evidência",
+    captureEvidence: "Capturar evidência",
+    capturingEvidence: "Capturando evidência…",
+    noEvidence: "Nenhuma evidência capturada.",
     sessionReady: "Sessão iniciada.",
     loading: "Carregando…",
     errorGeneric: "Não foi possível concluir a operação. Tente novamente.",
@@ -54,6 +59,7 @@ export const copy = {
     errorInvalidRequest: "Confira os dados e tente novamente.",
     errorInvalidCVSS: "Informe um vetor CVSS 3.1 válido.",
     errorInvalidState: "O estado atual não permite esta operação.",
+    errorEvidenceTooLarge: "O arquivo de evidência excede o limite de 32 MiB.",
     errorForbidden: "Você não tem permissão para esta operação.",
     errorNotFound: "O item solicitado não foi encontrado.",
     noClientSelected: "Selecione um cliente antes de criar um engagement.",
@@ -123,6 +129,11 @@ export const copy = {
     recordRetest: "Record retest",
     recordingRetest: "Recording retest…",
     noRetests: "No retests recorded.",
+    evidence: "Evidence",
+    evidenceFile: "Evidence file",
+    captureEvidence: "Capture evidence",
+    capturingEvidence: "Capturing evidence…",
+    noEvidence: "No evidence captured.",
     sessionReady: "Session started.",
     loading: "Loading…",
     errorGeneric: "We could not complete the operation. Try again.",
@@ -130,6 +141,7 @@ export const copy = {
     errorInvalidRequest: "Check the information and try again.",
     errorInvalidCVSS: "Enter a valid CVSS 3.1 vector.",
     errorInvalidState: "The current state does not allow this operation.",
+    errorEvidenceTooLarge: "The evidence file exceeds the 32 MiB limit.",
     errorForbidden: "You do not have permission for this operation.",
     errorNotFound: "The requested item was not found.",
     noClientSelected: "Select a client before creating an engagement.",
@@ -167,6 +179,8 @@ export function apiErrorMessage(code: string, locale: Locale) {
       return text.errorInvalidCVSS;
     case "invalid_state":
       return text.errorInvalidState;
+    case "evidence_too_large":
+      return text.errorEvidenceTooLarge;
     case "forbidden":
       return text.errorForbidden;
     case "not_found":
