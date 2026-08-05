@@ -6,6 +6,7 @@ import { approveReportRevision, captureEvidence, collectionItems, createEngageme
 import { apiErrorMessage, copy, type Locale } from "./copy";
 
 type Collection<T> = { items: T[] | null };
+type Section = "overview" | "clients" | "projects" | "methodologies" | "findings" | "evidence" | "reports" | "integrations";
 
 export default function HomePage() {
   const [locale, setLocale] = useState<Locale>("pt-BR");
@@ -34,6 +35,7 @@ export default function HomePage() {
   const [retestInput, setRetestInput] = useState<Omit<RetestInput, "round">>({ resultState: "open", procedure: "", observedResult: "", justification: "" });
   const [busy, setBusy] = useState<"login" | "client" | "methodology" | "publish" | "engagement" | "finding" | "triage" | "retest" | "evidence" | "report" | "approve" | "pdf" | "">("");
   const [error, setError] = useState("");
+  const [section, setSection] = useState<Section>("overview");
   const errorRef = useRef<HTMLParagraphElement>(null);
   const findingIDRef = useRef("");
   const text = copy[locale];
@@ -125,7 +127,8 @@ export default function HomePage() {
       return;
     }
     try {
-      await Promise.all([loadFindings(id), loadReports(id)]);
+      const [, , engagementChecklist] = await Promise.all([loadFindings(id), loadReports(id), readEngagementChecklist(id)]);
+      setChecklist(engagementChecklist);
     } catch (reason) {
       setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
     }
@@ -330,11 +333,18 @@ export default function HomePage() {
 
   const signedIn = Boolean(csrf);
   const selectedFinding = findings.find((finding) => finding.id === findingID);
+  const selectedClient = clients.find((client) => client.id === clientID);
+  const selectedEngagement = engagements.find((engagement) => engagement.id === engagementID);
+  const navigation: { id: Section; label: string }[] = [
+    { id: "overview", label: text.overview }, { id: "clients", label: text.clients }, { id: "projects", label: text.projects },
+    { id: "methodologies", label: text.methodologies }, { id: "findings", label: text.findings }, { id: "evidence", label: text.evidence },
+    { id: "reports", label: text.reports }, { id: "integrations", label: text.integrations },
+  ];
 
   return (
-    <main className="portfolio-shell">
-      <header className="portfolio-header">
-        <div><strong>{text.title}</strong><span>{text.subtitle}</span></div>
+    <main className={signedIn ? "app-shell" : "login-shell"}>
+      {!signedIn ? <section className="login-panel" aria-labelledby="sign-in-title">
+        <header className="login-header"><div><strong>{text.title}</strong><span>{text.subtitle}</span></div>
         <label>
           <span>{text.language}</span>
           <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
@@ -342,27 +352,27 @@ export default function HomePage() {
             <option value="en">{text.english}</option>
           </select>
         </label>
-      </header>
-
-      {error && <p className="error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
-
-      {!signedIn ? (
-        <section className="panel" aria-labelledby="sign-in-title">
-          <h1 id="sign-in-title">{text.signIn}</h1>
-          <form onSubmit={signIn}>
-            <label htmlFor="email">{text.email}</label>
-            <input id="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
-            <label htmlFor="password">{text.password}</label>
-            <input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
-            <button type="submit" disabled={busy === "login"}>{busy === "login" ? text.signingIn : text.signInAction}</button>
-          </form>
-        </section>
-      ) : (
-        <section className="portfolio" aria-labelledby="portfolio-title">
-          <h1 id="portfolio-title">{text.portfolio}</h1>
-          <p aria-live="polite">{busy ? text.loading : text.sessionReady}</p>
-          <div className="portfolio-grid">
-            <section className="panel" aria-labelledby="clients-title">
+        </header>
+        {error && <p className="error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
+        <h1 id="sign-in-title">{text.signIn}</h1>
+        <form onSubmit={signIn}>
+          <label htmlFor="email">{text.email}</label>
+          <input id="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+          <label htmlFor="password">{text.password}</label>
+          <input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+          <button type="submit" disabled={busy === "login"}>{busy === "login" ? text.signingIn : text.signInAction}</button>
+        </form>
+      </section> : <>
+        <aside className="app-rail" aria-label={text.title}>
+          <div className="brand"><strong>{text.title}</strong><span>{text.subtitle}</span></div>
+          <nav>{navigation.map((item) => <button key={item.id} type="button" className={section === item.id ? "active" : ""} aria-current={section === item.id ? "page" : undefined} onClick={() => setSection(item.id)}>{item.label}</button>)}</nav>
+          <label><span>{text.language}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}><option value="pt-BR">{text.portuguese}</option><option value="en">{text.english}</option></select></label>
+        </aside>
+        <section className="app-content">
+          <header className="context-bar"><div><span>{text.engagementContext}</span><strong>{selectedClient?.name ?? text.selectClient} / {selectedEngagement?.name ?? text.selectEngagement}</strong></div><p aria-live="polite">{busy ? text.loadingWorkspace : text.sessionReady}</p></header>
+          {error && <p className="error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
+          {section === "overview" && <section className="workbench" aria-labelledby="overview-title"><div><h1 id="overview-title">{text.workspace}</h1><p>{text.workbenchDescription}</p></div><div className="context-selectors"><label htmlFor="workspace-client">{text.clientContext}</label><select id="workspace-client" value={clientID} onChange={(event) => void selectClient(event.target.value)}><option value="">{text.selectClient}</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><label htmlFor="workspace-engagement">{text.projectContext}</label><select id="workspace-engagement" value={engagementID} onChange={(event) => void selectEngagement(event.target.value)} disabled={!clientID}><option value="">{text.selectEngagement}</option>{engagements.map((engagement) => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}</select></div><div className="workbench-summary"><h2>{text.workbench}</h2><p>{engagementID ? text.projectSummary : text.noEngagementSelected}</p></div></section>}
+          {section === "clients" && <section className="surface" aria-labelledby="clients-title">
               <h2 id="clients-title">{text.clients}</h2>
               <form onSubmit={createClient}>
                 <label htmlFor="client-name">{text.clientName}</label>
@@ -375,8 +385,8 @@ export default function HomePage() {
                 {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
               </select>
               {!clients.length && <p>{text.noClients}</p>}
-            </section>
-            <section className="panel" aria-labelledby="methodologies-title">
+            </section>}
+          {section === "methodologies" && <section className="surface" aria-labelledby="methodologies-title">
               <h2 id="methodologies-title">{text.methodologies}</h2>
               <form onSubmit={submitMethodology}>
                 <label htmlFor="methodology-name">{text.methodologyName}</label>
@@ -396,8 +406,8 @@ export default function HomePage() {
                 <button type="submit" disabled={busy === "methodology"}>{busy === "methodology" ? text.creatingMethodology : text.createMethodology}</button>
               </form>
               <ul>{methodologies.map((methodology) => <li key={methodology.id}>{methodology.name} v{methodology.versionNumber} — {methodology.state} {methodology.state === "draft" && <button type="button" onClick={() => void publish(methodology.templateId)} disabled={busy === "publish"}>{busy === "publish" ? text.publishingMethodology : text.publishMethodology}</button>}</li>)}</ul>
-            </section>
-            <section className="panel" aria-labelledby="engagements-title">
+            </section>}
+          {section === "projects" && <section className="surface" aria-labelledby="engagements-title">
               <h2 id="engagements-title">{text.engagements}</h2>
               <form onSubmit={createEngagement}>
                 <label htmlFor="engagement-name">{text.engagementName}</label>
@@ -415,12 +425,9 @@ export default function HomePage() {
                 {engagements.map((engagement) => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}
               </select>
               {clientID && !engagements.length && <p>{text.noEngagements}</p>}
-            </section>
-            <section className="panel" aria-labelledby="checklist-title">
-              <h2 id="checklist-title">{text.checklist}</h2>
-              {checklist ? <><p>{checklist.name} v{checklist.versionNumber} — {checklist.sourceName} {checklist.sourceVersion}</p><ul>{checklist.items.map((item) => <li key={item.position}>{item.title}: {item.objective} — {item.procedure}</li>)}</ul></> : <p>{text.noChecklist}</p>}
-            </section>
-            <section className="panel" aria-labelledby="reports-title">
+              <div className="secondary-surface"><h3>{text.projectChecklist}</h3>{checklist ? <><p>{checklist.name} v{checklist.versionNumber} — {checklist.sourceName} {checklist.sourceVersion}</p><ul>{checklist.items.map((item) => <li key={item.position}>{item.title}: {item.objective} — {item.procedure}</li>)}</ul></> : <p>{text.noChecklist}</p>}</div>
+            </section>}
+          {section === "reports" && <section className="surface" aria-labelledby="reports-title">
               <h2 id="reports-title">{text.reports}</h2>
               <form onSubmit={submitReport}>
                 <label htmlFor="report-file">{text.reportFile}</label>
@@ -429,8 +436,8 @@ export default function HomePage() {
               </form>
               <ul aria-live="polite">{reports.map((report) => <li key={report.id}>{report.filename} — {report.state} — {report.sha256} — {report.byteSize} {report.state === "stored" && !report.approvedAt && <button type="button" onClick={() => void approveReport(report.id)} disabled={busy === "approve"}>{busy === "approve" ? text.approvingReport : text.approveReport}</button>} {report.approvedAt && <button type="button" onClick={() => void derivePDF(report.id)} disabled={busy === "pdf"}>{busy === "pdf" ? text.derivingPDF : text.derivePDF}</button>} {reportPDFs.filter((pdf) => pdf.revisionId === report.id).map((pdf) => <p key={pdf.id}>{text.derivedPDF} — {pdf.state} — {pdf.sourceSha256} — {pdf.sha256} — {pdf.byteSize}</p>)}</li>)}</ul>
               {engagementID && !reports.length && <p>{text.noReports}</p>}
-            </section>
-            <section className="panel" aria-labelledby="findings-title">
+            </section>}
+          {section === "findings" && <section className="surface" aria-labelledby="findings-title">
               <h2 id="findings-title">{text.findings}</h2>
               <form onSubmit={submitFinding}>
                 <label htmlFor="finding-title">{text.findingTitle}</label>
@@ -453,8 +460,8 @@ export default function HomePage() {
                 {findings.map((finding) => <option key={finding.id} value={finding.id}>{finding.title} — {text.score} {finding.cvssScore} — {finding.validationState}/{finding.remediationState ?? "new"}</option>)}
               </select>
               {engagementID && !findings.length && <p>{text.noFindings}</p>}
-            </section>
-            <section className="panel" aria-labelledby="retests-title">
+            </section>}
+          {section === "evidence" && <section className="surface" aria-labelledby="retests-title">
               <h2 id="retests-title">{text.retests}</h2>
               {selectedFinding?.validationState === "new" && <button type="button" onClick={() => void confirmFinding()} disabled={busy === "triage"}>{busy === "triage" ? text.confirmingFinding : text.confirmFinding}</button>}
               <form onSubmit={submitRetest}>
@@ -480,10 +487,10 @@ export default function HomePage() {
               </form>
               <ul aria-live="polite">{evidence.map((item) => <li key={item.id}>{item.filename} — {item.state} — {item.sha256} — {item.byteSize}</li>)}</ul>
               {findingID && !evidence.length && <p>{text.noEvidence}</p>}
-            </section>
-          </div>
+            </section>}
+          {section === "integrations" && <section className="surface integration-surface" aria-labelledby="integrations-title"><h2 id="integrations-title">{text.integrations}</h2><h3>{text.cliTitle}</h3><p>{text.cliDescription}</p><p>{text.integrationDescription}</p></section>}
         </section>
-      )}
+      </>}
     </main>
   );
 }
