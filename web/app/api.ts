@@ -7,6 +7,40 @@ export type Engagement = Client & {
   clientId: string;
 };
 
+export type MethodologyItem = {
+  position?: number;
+  title: string;
+  objective: string;
+  preconditions?: string;
+  procedure: string;
+  expectedEvidence?: string;
+  reference?: string;
+  notes?: string;
+};
+
+export type Methodology = {
+  id: string;
+  templateId: string;
+  versionNumber: number;
+  state: "draft" | "published";
+  name: string;
+  sourceName: string;
+  sourceVersion: string;
+  attribution: string;
+  items: MethodologyItem[];
+};
+
+export type MethodologyInput = Pick<Methodology, "name" | "sourceName" | "sourceVersion" | "attribution" | "items">;
+
+export type EngagementInput = Pick<Engagement, "name"> & { methodologyVersionId: string };
+
+export type EngagementChecklist = Pick<Methodology, "name" | "sourceName" | "sourceVersion" | "attribution" | "items"> & {
+  id: string;
+  engagementId: string;
+  templateVersionId: string;
+  versionNumber: number;
+};
+
 export type Finding = {
   id: string;
   engagementId: string;
@@ -66,4 +100,20 @@ export function triageFinding(findingID: string, csrf: string, fetcher?: Fetcher
 
 export function recordRetest(findingID: string, input: RetestInput, csrf: string, fetcher?: Fetcher) {
   return requestJSON<Retest>(`/v1/findings/${encodeURIComponent(findingID)}/retests`, { method: "POST", body: JSON.stringify(input) }, csrf, fetcher);
+}
+
+export function createMethodology(input: MethodologyInput, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<Methodology>("/v1/methodology-templates", { method: "POST", body: JSON.stringify(input) }, csrf, fetcher);
+}
+
+export function publishMethodology(templateID: string, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<Methodology>(`/v1/methodology-templates/${encodeURIComponent(templateID)}/publish`, { method: "POST" }, csrf, fetcher);
+}
+
+export function createEngagement(clientID: string, input: EngagementInput, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<Engagement>(`/v1/clients/${encodeURIComponent(clientID)}/engagements`, { method: "POST", body: JSON.stringify(input) }, csrf, fetcher);
+}
+
+export function readEngagementChecklist(engagementID: string, fetcher?: Fetcher) {
+  return requestJSON<EngagementChecklist>(`/v1/engagements/${encodeURIComponent(engagementID)}/checklist`, {}, undefined, fetcher);
 }

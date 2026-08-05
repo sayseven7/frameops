@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-import { createFinding, recordRetest, triageFinding, type Client, type Engagement, type Finding, type FindingInput, type Retest, type RetestInput, requestJSON } from "./api";
+import { createEngagement as createEngagementRequest, createFinding, createMethodology, publishMethodology, readEngagementChecklist, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Finding, type FindingInput, type Methodology, type MethodologyInput, type Retest, type RetestInput, requestJSON } from "./api";
 import { apiErrorMessage, copy, type Locale } from "./copy";
 
 type Collection<T> = { items: T[] };
@@ -16,14 +16,18 @@ export default function HomePage() {
   const [engagements, setEngagements] = useState<Engagement[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [retests, setRetests] = useState<Retest[]>([]);
+  const [methodologies, setMethodologies] = useState<Methodology[]>([]);
+  const [checklist, setChecklist] = useState<EngagementChecklist>();
   const [clientID, setClientID] = useState("");
   const [engagementID, setEngagementID] = useState("");
   const [findingID, setFindingID] = useState("");
   const [clientName, setClientName] = useState("");
   const [engagementName, setEngagementName] = useState("");
+  const [methodologyID, setMethodologyID] = useState("");
+  const [methodologyInput, setMethodologyInput] = useState<MethodologyInput>({ name: "", sourceName: "", sourceVersion: "", attribution: "", items: [{ title: "", objective: "", procedure: "" }] });
   const [findingInput, setFindingInput] = useState<FindingInput>({ title: "", description: "", impact: "", remediation: "", reproduction: "", cvssVector: "" });
   const [retestInput, setRetestInput] = useState<Omit<RetestInput, "round">>({ resultState: "open", procedure: "", observedResult: "", justification: "" });
-  const [busy, setBusy] = useState<"login" | "client" | "engagement" | "finding" | "triage" | "retest" | "">("");
+  const [busy, setBusy] = useState<"login" | "client" | "methodology" | "publish" | "engagement" | "finding" | "triage" | "retest" | "">("");
   const [error, setError] = useState("");
   const errorRef = useRef<HTMLParagraphElement>(null);
   const text = copy[locale];
@@ -44,6 +48,10 @@ export default function HomePage() {
     setRetests((await requestJSON<Collection<Retest>>(`/v1/findings/${encodeURIComponent(id)}/retests`)).items);
   }
 
+  async function loadMethodologies() {
+    setMethodologies((await requestJSON<Collection<Methodology>>("/v1/methodology-templates")).items);
+  }
+
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy("login");
@@ -53,6 +61,7 @@ export default function HomePage() {
       const token = await requestJSON<{ token: string }>("/v1/csrf");
       setCSRF(token.token);
       setClients((await requestJSON<Collection<Client>>("/v1/clients")).items);
+      await loadMethodologies();
       setPassword("");
     } catch (reason) {
       setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
@@ -125,19 +134,52 @@ export default function HomePage() {
     }
   }
 
+  async function submitMethodology(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy("methodology");
+    setError("");
+    try {
+      const methodology = await createMethodology(methodologyInput, csrf);
+      setMethodologies((current) => [...current, methodology]);
+      setMethodologyInput({ name: "", sourceName: "", sourceVersion: "", attribution: "", items: [{ title: "", objective: "", procedure: "" }] });
+    } catch (reason) {
+      setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function publish(templateID: string) {
+    setBusy("publish");
+    setError("");
+    try {
+      const methodology = await publishMethodology(templateID, csrf);
+      setMethodologies((current) => current.map((item) => item.id === methodology.id ? methodology : item));
+    } catch (reason) {
+      setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function createEngagement(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!clientID) {
       setError(text.noClientSelected);
       return;
     }
+    if (!methodologyID) {
+      setError(text.noMethodologySelected);
+      return;
+    }
     setBusy("engagement");
     setError("");
     try {
-      const engagement = await requestJSON<Engagement>(`/v1/clients/${encodeURIComponent(clientID)}/engagements`, { method: "POST", body: JSON.stringify({ name: engagementName }) }, csrf);
+      const engagement = await createEngagementRequest(clientID, { name: engagementName, methodologyVersionId: methodologyID }, csrf);
       setEngagements((current) => [...current, engagement]);
       setEngagementName("");
       await selectEngagement(engagement.id);
+      setChecklist(await readEngagementChecklist(engagement.id));
     } catch (reason) {
       setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
     } finally {
@@ -241,12 +283,38 @@ export default function HomePage() {
               </select>
               {!clients.length && <p>{text.noClients}</p>}
             </section>
+            <section className="panel" aria-labelledby="methodologies-title">
+              <h2 id="methodologies-title">{text.methodologies}</h2>
+              <form onSubmit={submitMethodology}>
+                <label htmlFor="methodology-name">{text.methodologyName}</label>
+                <input id="methodology-name" value={methodologyInput.name} onChange={(event) => setMethodologyInput((input) => ({ ...input, name: event.target.value }))} required />
+                <label htmlFor="methodology-source">{text.sourceName}</label>
+                <input id="methodology-source" value={methodologyInput.sourceName} onChange={(event) => setMethodologyInput((input) => ({ ...input, sourceName: event.target.value }))} required />
+                <label htmlFor="methodology-source-version">{text.sourceVersion}</label>
+                <input id="methodology-source-version" value={methodologyInput.sourceVersion} onChange={(event) => setMethodologyInput((input) => ({ ...input, sourceVersion: event.target.value }))} required />
+                <label htmlFor="methodology-attribution">{text.attribution}</label>
+                <textarea id="methodology-attribution" value={methodologyInput.attribution} onChange={(event) => setMethodologyInput((input) => ({ ...input, attribution: event.target.value }))} required />
+                <label htmlFor="methodology-item-title">{text.checklistItemTitle}</label>
+                <input id="methodology-item-title" value={methodologyInput.items[0].title} onChange={(event) => setMethodologyInput((input) => ({ ...input, items: [{ ...input.items[0], title: event.target.value }] }))} required />
+                <label htmlFor="methodology-item-objective">{text.checklistObjective}</label>
+                <textarea id="methodology-item-objective" value={methodologyInput.items[0].objective} onChange={(event) => setMethodologyInput((input) => ({ ...input, items: [{ ...input.items[0], objective: event.target.value }] }))} required />
+                <label htmlFor="methodology-item-procedure">{text.checklistProcedure}</label>
+                <textarea id="methodology-item-procedure" value={methodologyInput.items[0].procedure} onChange={(event) => setMethodologyInput((input) => ({ ...input, items: [{ ...input.items[0], procedure: event.target.value }] }))} required />
+                <button type="submit" disabled={busy === "methodology"}>{busy === "methodology" ? text.creatingMethodology : text.createMethodology}</button>
+              </form>
+              <ul>{methodologies.map((methodology) => <li key={methodology.id}>{methodology.name} v{methodology.versionNumber} — {methodology.state} {methodology.state === "draft" && <button type="button" onClick={() => void publish(methodology.templateId)} disabled={busy === "publish"}>{busy === "publish" ? text.publishingMethodology : text.publishMethodology}</button>}</li>)}</ul>
+            </section>
             <section className="panel" aria-labelledby="engagements-title">
               <h2 id="engagements-title">{text.engagements}</h2>
               <form onSubmit={createEngagement}>
                 <label htmlFor="engagement-name">{text.engagementName}</label>
                 <input id="engagement-name" value={engagementName} onChange={(event) => setEngagementName(event.target.value)} required disabled={!clientID} />
-                <button type="submit" disabled={!clientID || busy === "engagement"}>{busy === "engagement" ? text.creatingEngagement : text.createEngagement}</button>
+                <label htmlFor="methodology-select">{text.selectMethodology}</label>
+                <select id="methodology-select" value={methodologyID} onChange={(event) => setMethodologyID(event.target.value)} required disabled={!clientID}>
+                  <option value="">{text.selectMethodology}</option>
+                  {methodologies.filter((methodology) => methodology.state === "published").map((methodology) => <option key={methodology.id} value={methodology.id}>{methodology.name} v{methodology.versionNumber}</option>)}
+                </select>
+                <button type="submit" disabled={!clientID || !methodologyID || busy === "engagement"}>{busy === "engagement" ? text.creatingEngagement : text.createEngagement}</button>
               </form>
               <label htmlFor="engagement-select">{text.selectEngagement}</label>
               <select id="engagement-select" value={engagementID} onChange={(event) => void selectEngagement(event.target.value)} disabled={!clientID}>
@@ -254,6 +322,10 @@ export default function HomePage() {
                 {engagements.map((engagement) => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}
               </select>
               {clientID && !engagements.length && <p>{text.noEngagements}</p>}
+            </section>
+            <section className="panel" aria-labelledby="checklist-title">
+              <h2 id="checklist-title">{text.checklist}</h2>
+              {checklist ? <><p>{checklist.name} v{checklist.versionNumber} — {checklist.sourceName} {checklist.sourceVersion}</p><ul>{checklist.items.map((item) => <li key={item.position}>{item.title}: {item.objective} — {item.procedure}</li>)}</ul></> : <p>{text.noChecklist}</p>}
             </section>
             <section className="panel" aria-labelledby="findings-title">
               <h2 id="findings-title">{text.findings}</h2>
