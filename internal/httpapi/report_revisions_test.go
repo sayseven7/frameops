@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -13,7 +14,9 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sayseven7/frameops/internal/render"
 )
@@ -84,6 +87,63 @@ func TestReportRevisionApprovalIsScopedAndConflicts(t *testing.T) {
 	sort.Ints(statuses)
 	if want := []int{http.StatusOK, http.StatusConflict}; statuses[0] != want[0] || statuses[1] != want[1] {
 		t.Fatalf("concurrent approval statuses = %v, want %v", statuses, want)
+	}
+}
+
+func TestGeneratedReportCreatesAStoredImmutableDOCXRevision(t *testing.T) {
+	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("FRAMEOPS_DATABASE_URL is required for HTTP integration tests")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	server := New(pool, evidenceBucket(t), render.Worker{})
+	organizationID := createOrganization(t, ctx, pool, "Generated Report Organization")
+	cookie, csrf := signIn(t, ctx, server, pool, organizationID, "admin", fmt.Sprintf("generated-report-%d@example.test", time.Now().UnixNano()))
+	engagementID := reportEngagement(t, server, cookie, csrf, "Generated Report Engagement")
+
+	generated := request(t, server, http.MethodPost, "/v1/engagements/"+url.PathEscape(engagementID)+"/reports/generate", "", cookie, csrf)
+	if generated.Code != http.StatusCreated {
+		t.Fatalf("generate report status = %d, want %d: %s", generated.Code, http.StatusCreated, generated.Body.String())
+	}
+	var revision struct {
+		Filename string `json:"filename"`
+		State    string `json:"state"`
+		SHA256   string `json:"sha256"`
+	}
+	if err := json.NewDecoder(generated.Body).Decode(&revision); err != nil {
+		t.Fatalf("decode generated revision: %v", err)
+	}
+	if revision.Filename != "frameops-structured-v1.docx" || revision.State != "stored" || len(revision.SHA256) != 64 {
+		t.Fatalf("generated revision = %+v, want a stored versioned DOCX", revision)
+	}
+}
+
+func TestStructuredReportSnapshotUsesRepeatableRead(t *testing.T) {
+	databaseURL := os.Getenv("FRAMEOPS_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("FRAMEOPS_DATABASE_URL is required for HTTP integration tests")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	var isolation string
+	_, err = (Server{pool: pool}).withStructuredReportSnapshot(ctx, func(tx pgx.Tx) ([]byte, error) {
+		return nil, tx.QueryRow(ctx, "SHOW transaction_isolation").Scan(&isolation)
+	})
+	if err != nil {
+		t.Fatalf("read structured report snapshot isolation: %v", err)
+	}
+	if isolation != "repeatable read" {
+		t.Fatalf("structured report snapshot isolation = %q, want repeatable read", isolation)
 	}
 }
 

@@ -35,7 +35,7 @@ const (
 // other variable is refused rather than ignored: a worker that can see a
 // database URL or an object-storage key is no longer isolated, and failing at
 // start-up is the only way to notice that the boundary was crossed.
-var allowedEnvironment = map[string]bool{"PATH": true, "HOME": true, "TMPDIR": true, "LANG": true, "LC_ALL": true, "TZ": true}
+var allowedEnvironment = map[string]bool{"PATH": true, "HOME": true, "TMPDIR": true, "LANG": true, "LC_ALL": true, "TZ": true, "PWD": true}
 
 func main() {
 	if err := run(os.Args[1:], os.Environ(), os.Stdout); err != nil {
