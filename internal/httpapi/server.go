@@ -45,6 +45,14 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.csrf(response, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/session/logout":
 		server.logout(response, request)
+	case request.URL.Path == "/v1/organization":
+		server.organizationAdministration(response, request)
+	case request.URL.Path == "/v1/organization/members":
+		server.organizationMembers(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/organization/members/"):
+		server.organizationMember(response, request)
+	case request.URL.Path == "/v1/organization/audit-events":
+		server.organizationAuditEvents(response, request)
 	case request.URL.Path == "/v1/clients":
 		server.clients(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/clients/") && strings.HasSuffix(request.URL.Path, "/engagements"):

@@ -132,6 +132,11 @@ export type ReportPDF = {
   byteSize: number;
 };
 
+export type Organization = { id: string; name: string };
+export type OrganizationMember = { id: string; displayName: string; email: string; role: "admin" | "member"; isActive: boolean };
+export type OrganizationMemberInput = Pick<OrganizationMember, "displayName" | "email" | "role"> & { password: string };
+export type AuditEvent = { id: string; action: string; targetType: string; targetId: string; outcome: string; createdAt: string; context: Record<string, never> };
+
 type Fetcher = typeof fetch;
 
 export function collectionItems<T>(collection: { items: T[] | null }): T[] {
@@ -230,4 +235,33 @@ export function approveReportRevision(revisionID: string, csrf: string, fetcher?
 
 export function deriveReportPDF(revisionID: string, csrf: string, fetcher?: Fetcher) {
   return requestJSON<ReportPDF>(`/v1/report-revisions/${encodeURIComponent(revisionID)}/pdf`, { method: "POST" }, csrf, fetcher);
+}
+
+
+export function readOrganization(fetcher?: Fetcher) {
+  return requestJSON<Organization>("/v1/organization", {}, undefined, fetcher);
+}
+
+export function updateOrganization(name: string, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<Organization>("/v1/organization", { method: "PUT", body: JSON.stringify({ name }) }, csrf, fetcher);
+}
+
+export function listOrganizationMembers(fetcher?: Fetcher) {
+  return requestJSON<{ items: OrganizationMember[] | null }>("/v1/organization/members", {}, undefined, fetcher);
+}
+
+export function createOrganizationMember(input: OrganizationMemberInput, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<OrganizationMember>("/v1/organization/members", { method: "POST", body: JSON.stringify(input) }, csrf, fetcher);
+}
+
+export function updateOrganizationMember(memberID: string, input: Partial<Pick<OrganizationMember, "role" | "isActive">>, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<OrganizationMember>(`/v1/organization/members/${encodeURIComponent(memberID)}`, { method: "PATCH", body: JSON.stringify(input) }, csrf, fetcher);
+}
+
+export function listOrganizationAuditEvents({ action, cursor, limit }: { action?: string; cursor?: string; limit?: number } = {}, fetcher?: Fetcher) {
+  const params = new URLSearchParams();
+  if (action) params.set("action", action);
+  if (cursor) params.set("cursor", cursor);
+  if (limit) params.set("limit", String(limit));
+  return requestJSON<{ items: AuditEvent[] | null; nextCursor: string }>(`/v1/organization/audit-events${params.size ? `?${params}` : ""}`, {}, undefined, fetcher);
 }
