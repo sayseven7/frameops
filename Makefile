@@ -8,6 +8,7 @@ lint: ## run Go lint
 
 test: ## run all Go tests
 	go test ./...
+	bash scripts/check-compose_test.sh
 	bash scripts/local-runtime_test.sh
 
 web-check: ## verify the frozen frontend workspace
