@@ -41,9 +41,9 @@ code, .data-value { color:#c1ece9; font:600 .72rem/1.4 ui-monospace, SFMono-Regu
 .brand { display:flex; align-items:center; gap:10px; padding:0 10px 8px; }
 .brand-mark { display:grid; width:34px; height:34px; flex:0 0 auto; place-items:center; border:1px solid #416068; border-radius:8px; color:var(--signal) !important; font:800 .72rem ui-monospace, SFMono-Regular, Menlo, monospace; }
 .app-rail nav { display:grid; gap:3px; }
-.app-rail nav button { display:flex; align-items:center; justify-content:space-between; border:0; background:transparent; color:var(--muted); text-align:left; }
-.app-rail nav button:hover { background:var(--raised); color:var(--text); }
-.app-rail nav button.active { box-shadow:inset 2px 0 var(--signal); background:var(--raised); color:var(--text); }
+.app-rail nav a { display:flex; align-items:center; justify-content:space-between; color:var(--muted); text-align:left; text-decoration:none; }
+.app-rail nav a:hover { background:var(--raised); color:var(--text); }
+.app-rail nav a.active { box-shadow:inset 2px 0 var(--signal); background:var(--raised); color:var(--text); }
 .app-rail nav small { display:grid; min-width:22px; height:22px; place-items:center; border-radius:999px; background:#18383e; color:var(--text); font-size:.68rem; }
 .rail-context { display:grid; gap:3px; margin-top:auto; padding:14px 10px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
 .rail-context strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -194,7 +194,7 @@ dd { margin:0; color:#dbe7e3; }
   .app-shell { display:block; }
   .app-rail { position:static; height:auto; gap:12px; padding:14px 18px; border-right:0; border-bottom:1px solid var(--line); }
   .app-rail nav { display:flex; overflow-x:auto; }
-  .app-rail nav button { flex:0 0 auto; }
+  .app-rail nav a { flex:0 0 auto; }
   .rail-context, .app-rail > label { display:none; }
   .app-content { width:min(100% - 32px, 1320px); }
   .context-bar { position:sticky; z-index:4; top:0; min-height:70px; background:rgba(6,20,23,.97); }

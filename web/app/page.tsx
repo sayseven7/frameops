@@ -5,11 +5,17 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { approveReportRevision, captureEvidence, collectionItems, createEngagement as createEngagementRequest, createFinding, createMethodology, deriveReportPDF, publishMethodology, readEvidence, readEngagementChecklist, readReportRevisions, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Evidence, type Finding, type FindingInput, type Methodology, type MethodologyInput, type ReportPDF, type ReportRevision, type Retest, type RetestInput, requestJSON, uploadReportRevision } from "./api";
 import { apiErrorMessage, copy, type Locale } from "./copy";
 import { formatBytes, operationalQueue } from "./operations";
+import { workspaceRoute } from "./routes";
 
 type Collection<T> = { items: T[] | null };
 type Section = "overview" | "clients" | "projects" | "methodologies" | "findings" | "evidence" | "reports";
 
-export default function HomePage() {
+type HomePageProps = {
+  initialSection?: Section;
+  initialProjectID?: string;
+};
+
+export function Workspace({ initialSection = "overview", initialProjectID = "" }: HomePageProps) {
   const [locale, setLocale] = useState<Locale>("pt-BR");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,7 +32,7 @@ export default function HomePage() {
   const [methodologies, setMethodologies] = useState<Methodology[]>([]);
   const [checklist, setChecklist] = useState<EngagementChecklist>();
   const [clientID, setClientID] = useState("");
-  const [engagementID, setEngagementID] = useState("");
+  const [engagementID, setEngagementID] = useState(initialProjectID);
   const [findingID, setFindingID] = useState("");
   const [clientName, setClientName] = useState("");
   const [engagementName, setEngagementName] = useState("");
@@ -36,7 +42,7 @@ export default function HomePage() {
   const [retestInput, setRetestInput] = useState<Omit<RetestInput, "round">>({ resultState: "open", procedure: "", observedResult: "", justification: "" });
   const [busy, setBusy] = useState<"login" | "client" | "methodology" | "publish" | "engagement" | "finding" | "triage" | "retest" | "evidence" | "report" | "approve" | "pdf" | "">("");
   const [error, setError] = useState("");
-  const [section, setSection] = useState<Section>("overview");
+  const [section, setSection] = useState<Section>(initialSection);
   const errorRef = useRef<HTMLParagraphElement>(null);
   const contentRef = useRef<HTMLElement>(null);
   const findingIDRef = useRef("");
@@ -345,10 +351,10 @@ export default function HomePage() {
   const selectedEngagement = engagements.find((engagement) => engagement.id === engagementID);
   const queue = operationalQueue(findings, reports, reportPDFs);
   const queueTotal = Object.values(queue).reduce((total, count) => total + count, 0);
-  const navigation: { id: Section; label: string }[] = [
-    { id: "overview", label: text.overview }, { id: "clients", label: text.clients }, { id: "projects", label: text.projects },
-    { id: "methodologies", label: text.methodologies }, { id: "findings", label: text.findings }, { id: "evidence", label: text.evidence },
-    { id: "reports", label: text.reports },
+  const navigation: { id: Section; label: string; href: string }[] = [
+    { id: "overview", label: text.overview, href: "/dashboard" }, { id: "clients", label: text.clients, href: "/clients" }, { id: "projects", label: text.projects, href: "/projects" },
+    { id: "methodologies", label: text.methodologies, href: workspaceRoute(engagementID, "methodology") }, { id: "findings", label: text.findings, href: workspaceRoute(engagementID, "findings") }, { id: "evidence", label: text.evidence, href: workspaceRoute(engagementID, "evidence") },
+    { id: "reports", label: text.reports, href: workspaceRoute(engagementID, "reports") },
   ];
   const stateClass = (state: string | null | undefined) => `status status-${(state ?? "new").replaceAll("_", "-")}`;
 
@@ -363,7 +369,7 @@ export default function HomePage() {
       </section> : <>
         <aside className="app-rail" aria-label={text.title}>
           <div className="brand"><span className="brand-mark" aria-hidden="true">F7</span><div><strong>{text.title}</strong><span>{text.subtitle}</span></div></div>
-          <nav>{navigation.map((item) => <button key={item.id} type="button" className={section === item.id ? "active" : ""} aria-current={section === item.id ? "page" : undefined} onClick={() => setSection(item.id)}><span>{item.label}</span>{item.id === "overview" && queueTotal > 0 && <small aria-label={`${queueTotal} ${text.pendingActions}`}>{queueTotal}</small>}</button>)}</nav>
+          <nav>{navigation.map((item) => <a key={item.id} href={item.href} className={section === item.id ? "active" : ""} aria-current={section === item.id ? "page" : undefined}><span>{item.label}</span>{item.id === "overview" && queueTotal > 0 && <small aria-label={`${queueTotal} ${text.pendingActions}`}>{queueTotal}</small>}</a>)}</nav>
           <div className="rail-context"><span>{text.engagementContext}</span><strong>{selectedEngagement?.name ?? text.noActiveProject}</strong><small>{selectedClient?.name ?? text.selectClient}</small></div>
           <label><span>{text.language}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}><option value="pt-BR">{text.portuguese}</option><option value="en">{text.english}</option></select></label>
         </aside>
@@ -403,4 +409,8 @@ export default function HomePage() {
       </>}
     </main>
   );
+}
+
+export default function HomePage() {
+  return <Workspace />;
 }
