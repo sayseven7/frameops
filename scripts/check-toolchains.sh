@@ -83,7 +83,7 @@ else
 fi
 
 if docker_compose_output=$(docker compose version 2>/dev/null); then
-  if [[ $docker_compose_output =~ ^Docker\ Compose\ version\ v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+  if [[ $docker_compose_output =~ ^Docker\ Compose\ version\ v?([0-9]+\.[0-9]+\.[0-9]+)(\+[0-9A-Za-z.~+-]+)?$ ]]; then
     check_floor "Docker Compose" "${BASH_REMATCH[1]}" "2.20.0" "Install Docker Compose 2.20.0 or newer."
   else
     printf 'FAIL Docker Compose could not parse version from: %s\n' "$docker_compose_output" >&2
