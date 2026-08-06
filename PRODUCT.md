@@ -45,7 +45,7 @@ Operators use a Go CLI during testing, tool-output ingestion, and a web UI for p
 
 ## Brand Commitments
 
-The product should communicate security, precision, technical confidence, and legibility in dense operational views. The approved visual direction must support light, dark, and system themes; semantic design tokens; keyboard navigation; visible focus; and severity indicators that never rely on color alone. The final palette and visual world remain to be approved.
+The product communicates security, precision, technical confidence, and legibility through the approved FrameSeven Ops Deck visual direction: a dense, near-black operational desk where green denotes authorized scope/progress, cyan identifies data/evidence, and orange signals review. Light and system are semantic variations of this same identity, not separate brands. The UI uses semantic design tokens, keyboard navigation, visible focus, and written severity/state labels so color never carries meaning alone.
 
 ## Evidence on Hand
 

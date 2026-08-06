@@ -208,6 +208,25 @@ export const copy = {
     projectLeadFallback: "Até que o diretório de membros esteja disponível, o criador do projeto é o lead provisório.",
     activateProject: "Ativar projeto",
     closeProject: "Encerrar projeto",
+    theme: "Tema",
+    themeDark: "Escuro",
+    themeLight: "Claro",
+    themeSystem: "Sistema",
+    stateNew: "Novo",
+    statePending: "Pendente",
+    stateNeedsReview: "Requer revisão",
+    stateConfirmed: "Confirmado",
+    stateFalsePositive: "Falso positivo",
+    stateOpen: "Aberto",
+    stateRiskAccepted: "Risco aceito",
+    stateDraft: "Rascunho",
+    stateStored: "Armazenado",
+    statePublished: "Publicado",
+    stateApproved: "Aprovado",
+    stateFixed: "Corrigido",
+    stateNotReproduced: "Não reproduzido",
+    stateClosed: "Encerrado",
+    unknownState: "Estado desconhecido",
   },
   en: {
     language: "Language",
@@ -418,10 +437,51 @@ export const copy = {
     projectLeadFallback: "Until the member directory is available, the project creator is the provisional lead.",
     activateProject: "Activate project",
     closeProject: "Close project",
+    theme: "Theme",
+    themeDark: "Dark",
+    themeLight: "Light",
+    themeSystem: "System",
+    stateNew: "New",
+    statePending: "Pending",
+    stateNeedsReview: "Needs review",
+    stateConfirmed: "Confirmed",
+    stateFalsePositive: "False positive",
+    stateOpen: "Open",
+    stateRiskAccepted: "Risk accepted",
+    stateDraft: "Draft",
+    stateStored: "Stored",
+    statePublished: "Published",
+    stateApproved: "Approved",
+    stateFixed: "Fixed",
+    stateNotReproduced: "Not reproduced",
+    stateClosed: "Closed",
+    unknownState: "Unknown state",
   },
 } as const;
 
 export type Locale = keyof typeof copy;
+
+export function stateLabel(state: string | null | undefined, locale: Locale) {
+  const text = copy[locale];
+  switch (state) {
+    case "new": return text.stateNew;
+    case "pending": return text.statePending;
+    case "needs_review": return text.stateNeedsReview;
+    case "confirmed": return text.stateConfirmed;
+    case "false_positive": return text.stateFalsePositive;
+    case "open": return text.stateOpen;
+    case "risk_accepted": return text.stateRiskAccepted;
+    case "draft": return text.stateDraft;
+    case "stored": return text.stateStored;
+    case "published": return text.statePublished;
+    case "approved": return text.stateApproved;
+    case "fixed": return text.stateFixed;
+    case "not_reproduced": return text.stateNotReproduced;
+    case "active": return text.active;
+    case "closed": return text.stateClosed;
+    default: return text.unknownState;
+  }
+}
 
 export function apiErrorMessage(code: string, locale: Locale) {
   const text = copy[locale];
