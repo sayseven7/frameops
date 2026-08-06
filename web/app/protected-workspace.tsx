@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { destinationForSession } from "./auth";
 import { requestJSON } from "./api";
+import { copy } from "./copy";
 import { Workspace, type WorkspaceProps } from "./page";
 
 export default function ProtectedWorkspace(props: WorkspaceProps) {
@@ -20,5 +21,5 @@ export default function ProtectedWorkspace(props: WorkspaceProps) {
     return () => { active = false; };
   }, [pathname, router]);
 
-  return csrf ? <Workspace key={`${props.initialSection}:${props.initialProjectID}`} {...props} initialCSRF={csrf} /> : <main className="login-shell" aria-busy="true" />;
+  return csrf ? <Workspace key={`${props.initialSection}:${props.initialProjectID}`} {...props} initialCSRF={csrf} /> : <main className="login-shell" aria-busy="true"><p role="status">{copy["pt-BR"].loadingWorkspace}</p></main>;
 }
