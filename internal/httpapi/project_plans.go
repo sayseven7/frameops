@@ -124,13 +124,19 @@ func decodeProjectPlan(response http.ResponseWriter, request *http.Request) (pos
 	startsOn, startErr := time.Parse("2006-01-02", input.StartsOn)
 	endsOn, endErr := time.Parse("2006-01-02", input.EndsOn)
 	plan := postgres.ProjectPlan{StartsOn: startsOn, EndsOn: endsOn, RulesOfEngagement: strings.TrimSpace(input.RulesOfEngagement), Scope: postgres.ProjectScope{Targets: trimProjectPlanStrings(input.Targets), Exclusions: trimProjectPlanStrings(input.Exclusions)}, Team: input.Team}
-	if startErr != nil || endErr != nil || len(plan.RulesOfEngagement) == 0 || len(plan.RulesOfEngagement) > maxProjectPlanText {
+	if startErr != nil || endErr != nil || plan.EndsOn.Before(plan.StartsOn) || len(plan.RulesOfEngagement) == 0 || len(plan.RulesOfEngagement) > maxProjectPlanText {
 		writeError(response, http.StatusBadRequest, "invalid_request")
 		return postgres.ProjectPlan{}, false
 	}
+	for _, target := range append(append([]string{}, plan.Scope.Targets...), plan.Scope.Exclusions...) {
+		if len(target) == 0 || len(target) > 500 {
+			writeError(response, http.StatusBadRequest, "invalid_request")
+			return postgres.ProjectPlan{}, false
+		}
+	}
 	for _, milestone := range input.Milestones {
 		dueOn, err := time.Parse("2006-01-02", milestone.DueOn)
-		if err != nil {
+		if err != nil || strings.TrimSpace(milestone.Title) == "" || len(milestone.Title) > 200 || dueOn.Before(plan.StartsOn) || dueOn.After(plan.EndsOn) {
 			writeError(response, http.StatusBadRequest, "invalid_request")
 			return postgres.ProjectPlan{}, false
 		}

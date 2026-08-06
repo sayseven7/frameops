@@ -216,6 +216,9 @@ func validProjectPlan(plan ProjectPlan) error {
 func writeProjectPlanDetails(ctx context.Context, tx pgx.Tx, session Session, plan *ProjectPlan) error {
 	targets, _ := json.Marshal(plan.Scope.Targets)
 	exclusions, _ := json.Marshal(plan.Scope.Exclusions)
+	if plan.Scope.Exclusions == nil {
+		exclusions = []byte("[]")
+	}
 	if err := tx.QueryRow(ctx, `INSERT INTO engagement_scope_versions (organization_id, engagement_id, version_number, targets, exclusions, created_by) SELECT $1, $2, coalesce(max(version_number), 0) + 1, $3::jsonb, $4::jsonb, $5 FROM engagement_scope_versions WHERE organization_id = $1 AND engagement_id = $2 RETURNING version_number, created_at`, session.OrganizationID, plan.EngagementID, targets, exclusions, session.UserID).Scan(&plan.Scope.VersionNumber, &plan.Scope.CreatedAt); err != nil {
 		return fmt.Errorf("snapshot project scope: %w", err)
 	}
