@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, deriveReportPDF, publishMethodology, readEngagementChecklist, readIngestions, readReportRevisions, recordRetest, requestJSON, triageFinding, uploadReportRevision } from "./api.ts";
+import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, createProjectPlan, deriveReportPDF, publishMethodology, readEngagementChecklist, readIngestions, readProjectPlan, readReportRevisions, recordRetest, requestJSON, transitionProjectPlan, triageFinding, updateProjectPlan, uploadReportRevision } from "./api.ts";
 import { apiErrorMessage } from "./copy.ts";
 
 test("requestJSON keeps the session and sends CSRF for a mutating request", async () => {
@@ -102,7 +102,29 @@ test("apiErrorMessage names deterministic Nmap import refusals", () => {
 });
 
 test("collectionItems normalizes null items to an empty collection", () => {
-  assert.deepEqual(collectionItems<{ id: string }>({ items: null }), []);
+	assert.deepEqual(collectionItems<{ id: string }>({ items: null }), []);
+});
+
+test("project planning adapters use the scoped API and CSRF", async () => {
+	const requests: Request[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const request = new Request(new URL(input.toString(), "https://frameops.example.test"), init);
+		requests.push(request);
+		return Response.json({ engagementId: "engagement-id", status: "draft" });
+	};
+	const plan = { startsOn: "2026-08-10", endsOn: "2026-08-20", rulesOfEngagement: "No production disruption.", targets: ["app.example.test"], exclusions: [], team: [], milestones: [] };
+
+	await readProjectPlan("engagement-id", fetcher);
+	await createProjectPlan("engagement-id", plan, "csrf-token", fetcher);
+	await updateProjectPlan("engagement-id", plan, "csrf-token", fetcher);
+	await transitionProjectPlan("engagement-id", "active", "csrf-token", fetcher);
+
+	assert.deepEqual(requests.map((request) => [request.url, request.method, request.headers.get("X-CSRF-Token")]), [
+		["https://frameops.example.test/v1/engagements/engagement-id/plan", "GET", null],
+		["https://frameops.example.test/v1/engagements/engagement-id/plan", "POST", "csrf-token"],
+		["https://frameops.example.test/v1/engagements/engagement-id/plan", "PUT", "csrf-token"],
+		["https://frameops.example.test/v1/engagements/engagement-id/plan/transition", "POST", "csrf-token"],
+	]);
 });
 
 test("readIngestions loads the selected engagement's persisted import history", async () => {

@@ -57,6 +57,10 @@ func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Reque
 		server.methodologyPublication(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/checklist"):
 		server.engagementChecklist(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/plan/transition"):
+		server.projectPlanTransition(response, request)
+	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/plan"):
+		server.projectPlan(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/engagements/") && strings.HasSuffix(request.URL.Path, "/reports"):
 		server.reportRevisions(response, request)
 	case strings.HasPrefix(request.URL.Path, "/v1/report-revisions/") && strings.HasSuffix(request.URL.Path, "/approve"):
