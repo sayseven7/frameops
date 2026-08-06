@@ -6,7 +6,8 @@ Install Go 1.26.5 or newer, Node.js 22.12.0 or newer, pnpm 10.x, Python 3.13 or 
 
 ## Quick start
 
-Run the reproducible local runtime launcher:
+Run the reproducible local runtime launcher. It builds the Compose API and UI
+and waits for their readiness chain:
 
 ```bash
 bash scripts/local-runtime.sh
@@ -19,6 +20,18 @@ proves MinIO COMPLIANCE Object Lock rejects overwrite and delete, performs the
 single transactional bootstrap, and starts API `127.0.0.1:8081` and UI
 `localhost:3000`. It never prints generated secrets. The script refuses an
 occupied port, so it does not interfere with another local preview.
+
+Stop the same isolated project without deleting its named volumes:
+
+```bash
+bash scripts/local-runtime.sh down
+```
+
+For a disposable Compose deployment, copy `.env.example` to a local `.env`,
+provide local MinIO root-credential FIFOs, then run `docker compose up --build
+--wait`. Migration must complete before API readiness; UI readiness requires its
+own HTTP response after the API health check. Use `docker compose down --timeout
+10` for graceful shutdown.
 
 The UI uses its same-origin `/v1` proxy. The API keeps its production `Secure`
 cookie; browsers treat `localhost` as a secure local context, so local use does

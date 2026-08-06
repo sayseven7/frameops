@@ -8,14 +8,16 @@ lint: ## run Go lint
 
 test: ## run all Go tests
 	go test ./...
+	bash scripts/check-compose_test.sh
 	bash scripts/local-runtime_test.sh
+	bash scripts/deploy-contract_test.sh
 
 web-check: ## verify the frozen frontend workspace
 	pnpm install --frozen-lockfile --ignore-scripts
 	pnpm --filter @frameops/web test
 	pnpm --filter @frameops/web lint
 	pnpm --filter @frameops/web typecheck
-	pnpm --filter @frameops/web build
+	FRAMEOPS_API_URL=http://127.0.0.1:8081 pnpm --filter @frameops/web build
 
 github-actions-check: ## verify GitHub Actions security contracts
 	bash scripts/check_github_actions_test.sh

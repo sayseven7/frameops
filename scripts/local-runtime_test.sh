@@ -7,14 +7,15 @@ if [[ ! -f $script ]]; then
   exit 1
 fi
 
-for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state" | sha256sum | cut -d '\'' '\'' -f1)"' 'for command in docker go pnpm curl od ss base64 sha256sum; do' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'FRAMEOPS_POSTGRES_PORT=15432' 'FRAMEOPS_MINIO_PORT=19000' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:$postgres_password@127.0.0.1:15432/frameops_local?sslmode=disable' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:8081' 'FRAMEOPS_API_URL=http://127.0.0.1:8081' 'FRAMEOPS_UI_PORT=3000' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'go build -o "$worker" ./cmd/frameops-render' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"' 'psql -U frameops_local -d frameops_local -c '\''SELECT 1'\''' 'FRAMEOPS_API_URL=http://127.0.0.1:8081 pnpm --filter @frameops/web build' 'pnpm --filter @frameops/web exec next start --hostname 127.0.0.1 --port "$FRAMEOPS_UI_PORT"'; do
+# shellcheck disable=SC2016 # Intentional literals checked with grep below.
+for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state" | sha256sum | cut -d '\'' '\'' -f1)"' 'for command in docker go pnpm curl od ss base64 sha256sum; do' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'postgres_port=${FRAMEOPS_POSTGRES_PORT:-15432}' 'minio_port=${FRAMEOPS_MINIO_PORT:-19000}' 'api_port=${FRAMEOPS_API_PORT:-8081}' 'ui_port=${FRAMEOPS_UI_PORT:-3000}' 'FRAMEOPS_POSTGRES_PORT=$postgres_port' 'FRAMEOPS_MINIO_PORT=$minio_port' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:$postgres_password@postgres:5432/frameops_local?sslmode=disable' 'FRAMEOPS_DATABASE_URL="postgres://frameops_local:$postgres_password@127.0.0.1:$postgres_port/frameops_local?sslmode=disable"' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:$api_port' 'FRAMEOPS_API_PORT=$api_port' 'FRAMEOPS_UI_PORT=$ui_port' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"' 'psql -U frameops_local -d frameops_local -c '\''SELECT 1'\''' 'up --build --wait' 'curl --fail --silent --output /dev/null "http://127.0.0.1:$ui_port/"' 'down --timeout 10'; do
   if ! grep -Fq "$required" "$script"; then
     printf '%s must contain %q\n' "$script" "$required" >&2
     exit 1
   fi
 done
 
-if grep -Fq 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:***@' "$script"; then
+if grep -Fq '***' "$script"; then
   printf '%s must not use a masked database password\n' "$script" >&2
   exit 1
 fi
@@ -60,5 +61,131 @@ if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$long_state" bash "$script" 
 fi
 if [[ -e $work/docker-reached ]] || ! grep -Fq 'port 15432 is already listening; local runtime was not started' "$work/stderr"; then
   printf '%s must reject collisions before Docker is reached\n' "$script" >&2
+  exit 1
+fi
+
+own_state="$work/own-state"
+mkdir -p "$own_state"
+printf 'FRAMEOPS_LOCAL_OWN=1\n' >"$own_state/runtime.env"
+own_project="frameops-local-$(printf '%s' "$own_state" | sha256sum | cut -d ' ' -f1)"
+cat >"$work/bin/docker" <<EOF
+#!/bin/bash
+if [[ "\$*" == "compose --project-name $own_project --env-file $own_state/runtime.env ps -q" ]]; then
+  printf 'owned-container\n'
+  exit 0
+fi
+if [[ "\$1" == inspect && "\$*" == *Config.Labels* ]]; then
+  printf '%s\n' "$own_project"
+  exit 0
+fi
+if [[ "\$1" == inspect ]]; then
+  if [[ "\$*" == *.HostIp* ]]; then
+    printf '5432/tcp 127.0.0.1 15432\n'
+  else
+    printf '15432\n'
+  fi
+  exit 0
+fi
+exit 23
+EOF
+chmod 700 "$work/bin/docker"
+
+if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$own_state" bash "$script" >/dev/null 2>"$work/own-stderr"; then
+  printf '%s must continue when its own Compose project owns a listening port\n' "$script" >&2
+  exit 1
+fi
+if [[ $(<"$work/own-stderr") == *'port 15432 is already listening'* ]]; then
+  printf '%s must not reject a listening port owned by its Compose project\n' "$script" >&2
+  exit 1
+fi
+
+for binding in \
+  '5432/tcp 0.0.0.0 15432' \
+  '15432/tcp 127.0.0.1 15432' \
+  '5432/udp 127.0.0.1 15432'; do
+  cat >"$work/bin/docker" <<EOF
+#!/bin/bash
+if [[ "\$*" == "compose --project-name $own_project --env-file $own_state/runtime.env ps -q" ]]; then
+  printf 'owned-container\\n'
+  exit 0
+fi
+if [[ "\$1" == inspect && "\$*" == *Config.Labels* ]]; then
+  printf '%s\\n' "$own_project"
+  exit 0
+fi
+if [[ "\$1" == inspect ]]; then
+  if [[ "\$*" == *.HostIp* ]]; then
+    printf '%s\\n' "$binding"
+  else
+    printf '15432\\n'
+  fi
+  exit 0
+fi
+exit 23
+EOF
+  chmod 700 "$work/bin/docker"
+  if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$own_state" bash "$script" >/dev/null 2>"$work/binding-stderr"; then
+    printf '%s must reject a same-project container with binding %q\n' "$script" "$binding" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'port 15432 is already listening; local runtime was not started' "$work/binding-stderr"; then
+    printf '%s must require loopback HostIp, target, and tcp protocol for a reused port\n' "$script" >&2
+    exit 1
+  fi
+done
+
+foreign_state="$work/foreign-state"
+mkdir -p "$foreign_state"
+printf 'FRAMEOPS_LOCAL_FOREIGN=1\n' >"$foreign_state/runtime.env"
+foreign_project="frameops-local-$(printf '%s' "$foreign_state" | sha256sum | cut -d ' ' -f1)"
+for label in '' "$own_project"; do
+  cat >"$work/bin/docker" <<EOF
+#!/bin/bash
+if [[ "\$*" == "compose --project-name $foreign_project --env-file $foreign_state/runtime.env ps -q" ]]; then
+  printf 'foreign-container\\n'
+  exit 0
+fi
+if [[ "\$1" == inspect && "\$*" == *Config.Labels* ]]; then
+  printf '%s\\n' "$label"
+  exit 0
+fi
+if [[ "\$1" == inspect ]]; then
+  if [[ "\$*" == *.HostIp* ]]; then
+    printf '5432/tcp 127.0.0.1 15432\\n'
+  else
+    printf '15432\\n'
+  fi
+  exit 0
+fi
+exit 23
+EOF
+  chmod 700 "$work/bin/docker"
+  if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$foreign_state" bash "$script" >/dev/null 2>"$work/foreign-stderr"; then
+    printf '%s must reject a listening port with label %q\n' "$script" "$label" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'port 15432 is already listening; local runtime was not started' "$work/foreign-stderr"; then
+    printf '%s must require the current Compose project label for a listening port\n' "$script" >&2
+    exit 1
+  fi
+done
+
+status_state="$work/status-state"
+mkdir -p "$status_state"
+printf 'FRAMEOPS_LOCAL_STATUS=1\n' >"$status_state/runtime.env"
+status_project="frameops-local-$(printf '%s' "$status_state" | sha256sum | cut -d ' ' -f1)"
+cat >"$work/bin/docker" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >"$work/docker-status-args"
+exit 23
+EOF
+chmod 700 "$work/bin/docker"
+
+if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$status_state" bash "$script" status >/dev/null 2>"$work/status-stderr"; then
+  printf '%s status must propagate docker compose ps failures\n' "$script" >&2
+  exit 1
+fi
+if [[ $(<"$work/status-stderr") != '' ]] || [[ $(<"$work/docker-status-args") != "compose --project-name $status_project --env-file $status_state/runtime.env ps" ]]; then
+  printf '%s status must run scoped docker compose ps without starting services\n' "$script" >&2
   exit 1
 fi
