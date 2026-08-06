@@ -1,0 +1,24 @@
+"use client";
+
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+import { destinationForSession } from "./auth";
+import { requestJSON } from "./api";
+import { Workspace, type WorkspaceProps } from "./page";
+
+export default function ProtectedWorkspace(props: WorkspaceProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [csrf, setCSRF] = useState<string>();
+
+  useEffect(() => {
+    let active = true;
+    void requestJSON<{ token: string }>("/v1/csrf")
+      .then(({ token }) => { if (active) setCSRF(token); })
+      .catch(() => router.replace(destinationForSession(pathname, false)));
+    return () => { active = false; };
+  }, [pathname, router]);
+
+  return csrf ? <Workspace key={`${props.initialSection}:${props.initialProjectID}`} {...props} initialCSRF={csrf} /> : <main className="login-shell" aria-busy="true" />;
+}
