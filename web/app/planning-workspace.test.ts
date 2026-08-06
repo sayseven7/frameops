@@ -17,8 +17,8 @@ test("changing locale does not reload and replace the planning form", () => {
   assert.doesNotMatch(workspace, /\}, \[engagementID, locale, pathname, router\]\);/);
 });
 
-test("keeps the document language synchronized with the selected locale", () => {
-  for (const source of ["./login/login-form.tsx", "./page.tsx"]) {
+test("keeps the document language synchronized with the selected locale in every client locale consumer", () => {
+  for (const source of ["./login/login-form.tsx", "./page.tsx", "./organization-admin.tsx", "./planning-workspace.tsx"]) {
     const component = readFileSync(new URL(source, import.meta.url), "utf8");
     assert.match(component, /document\.documentElement\.lang = locale/);
   }
