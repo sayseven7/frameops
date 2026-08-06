@@ -1,5 +1,5 @@
-import { Workspace } from "../page";
+import ProtectedWorkspace from "../protected-workspace";
 
 export default function DashboardPage() {
-  return <Workspace initialSection="overview" />;
+  return <ProtectedWorkspace initialSection="overview" />;
 }

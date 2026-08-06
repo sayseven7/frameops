@@ -1,8 +1,8 @@
-import { Workspace } from "../../../page";
+import ProtectedWorkspace from "../../../protected-workspace";
 
 type ProjectPageProps = { params: Promise<{ id: string }> };
 
 export default async function ProjectReportsPage({ params }: ProjectPageProps) {
   const { id } = await params;
-  return <Workspace initialSection="reports" initialProjectID={id} />;
+  return <ProtectedWorkspace initialSection="reports" initialProjectID={id} />;
 }

@@ -1,5 +1,5 @@
-import { Workspace } from "../page";
+import ProtectedWorkspace from "../protected-workspace";
 
 export default function ProjectsPage() {
-  return <Workspace initialSection="projects" />;
+  return <ProtectedWorkspace initialSection="projects" />;
 }
