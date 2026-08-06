@@ -224,9 +224,13 @@ export function readIngestions(engagementID: string, fetcher?: Fetcher) {
 }
 
 export function uploadReportRevision(engagementID: string, file: File, csrf: string, fetcher?: Fetcher) {
-  const form = new FormData();
-  form.append("file", file);
-  return requestJSON<ReportRevision>(`/v1/engagements/${encodeURIComponent(engagementID)}/reports`, { method: "POST", body: form }, csrf, fetcher);
+	const form = new FormData();
+	form.append("file", file);
+	return requestJSON<ReportRevision>(`/v1/engagements/${encodeURIComponent(engagementID)}/reports`, { method: "POST", body: form }, csrf, fetcher);
+}
+
+export function generateReportRevision(engagementID: string, csrf: string, fetcher?: Fetcher) {
+	return requestJSON<ReportRevision>(`/v1/engagements/${encodeURIComponent(engagementID)}/reports/generate`, { method: "POST" }, csrf, fetcher);
 }
 
 export function approveReportRevision(revisionID: string, csrf: string, fetcher?: Fetcher) {

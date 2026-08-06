@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, createOrganizationMember, createProjectPlan, deriveReportPDF, listOrganizationAuditEvents, listOrganizationMembers, publishMethodology, readEngagementChecklist, readIngestions, readOrganization, readProjectPlan, readReportRevisions, recordRetest, requestJSON, transitionProjectPlan, triageFinding, updateOrganization, updateOrganizationMember, updateProjectPlan, uploadReportRevision } from "./api.ts";
+import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, createOrganizationMember, createProjectPlan, deriveReportPDF, generateReportRevision, listOrganizationAuditEvents, listOrganizationMembers, publishMethodology, readEngagementChecklist, readIngestions, readOrganization, readProjectPlan, readReportRevisions, recordRetest, requestJSON, transitionProjectPlan, triageFinding, updateOrganization, updateOrganizationMember, updateProjectPlan, uploadReportRevision } from "./api.ts";
 import { apiErrorMessage } from "./copy.ts";
 
 test("requestJSON keeps the session and sends CSRF for a mutating request", async () => {
@@ -104,6 +104,17 @@ test("apiErrorMessage names deterministic Nmap import refusals", () => {
 
 test("collectionItems normalizes null items to an empty collection", () => {
 	assert.deepEqual(collectionItems<{ id: string }>({ items: null }), []);
+});
+
+test("generated report requests use the scoped API and CSRF", async () => {
+	let request: Request | undefined;
+	await generateReportRevision("engagement-id", "csrf-token", async (input, init) => {
+		request = new Request(new URL(input.toString(), "https://frameops.example.test"), init);
+		return Response.json({ id: "revision-id" }, { status: 201 });
+	});
+	assert.equal(request?.url, "https://frameops.example.test/v1/engagements/engagement-id/reports/generate");
+	assert.equal(request?.method, "POST");
+	assert.equal(request?.headers.get("X-CSRF-Token"), "csrf-token");
 });
 
 test("project planning adapters use the scoped API and CSRF", async () => {
