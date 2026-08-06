@@ -15,6 +15,17 @@ func TestValidateDOCXAcceptsOnlyExactMinimalOOXMLProfile(t *testing.T) {
 	}
 }
 
+func TestValidateDOCXAcceptsLibreOfficeCompatibleOOXMLProfile(t *testing.T) {
+	file := docx(t, map[string]string{
+		"[Content_Types].xml": libreOfficeContentTypes(),
+		"_rels/.rels":         rootRelationships(`Id="rId1" Type="` + ooxmlOfficeDocument + `" Target="word/document.xml"`),
+		"word/document.xml":   `<w:document xmlns:w="` + ooxmlWordNS + `"><w:body><w:sectPr/></w:body></w:document>`,
+	})
+	if err := validateDOCX(file, fileSize(t, file)); err != nil {
+		t.Fatalf("validate LibreOffice-compatible DOCX = %v", err)
+	}
+}
+
 func TestValidateDOCXRejectsStructuralVariants(t *testing.T) {
 	tests := map[string]map[string]string{
 		"missing content-type override":     {"[Content_Types].xml": contentTypes(``), "_rels/.rels": rootRelationships(`Id="rId1" Type="` + ooxmlOfficeDocument + `" Target="word/document.xml"`), "word/document.xml": documentXML()},
@@ -58,9 +69,9 @@ func TestValidateDOCXRejectsUnsafeArchiveStructure(t *testing.T) {
 func validDOCX(t *testing.T) *os.File {
 	t.Helper()
 	return docx(t, map[string]string{
-		"[Content_Types].xml": contentTypes(`PartName="/word/document.xml" ContentType="` + ooxmlDocumentType + `"`),
+		"[Content_Types].xml": libreOfficeContentTypes(),
 		"_rels/.rels":         rootRelationships(`Id="rId1" Type="` + ooxmlOfficeDocument + `" Target="word/document.xml"`),
-		"word/document.xml":   documentXML(),
+		"word/document.xml":   `<w:document xmlns:w="` + ooxmlWordNS + `"><w:body><w:sectPr/></w:body></w:document>`,
 	})
 }
 
@@ -100,6 +111,10 @@ func fileSize(t *testing.T, file *os.File) int64 {
 
 func contentTypes(attributes string) string {
 	return `<Types xmlns="` + ooxmlContentTypesNS + `"><Override ` + attributes + `/></Types>`
+}
+
+func libreOfficeContentTypes() string {
+	return `<Types xmlns="` + ooxmlContentTypesNS + `"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="` + ooxmlDocumentType + `"/></Types>`
 }
 
 func rootRelationships(attributes string) string {
