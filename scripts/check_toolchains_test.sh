@@ -57,6 +57,7 @@ EOF
 }
 
 run_case "accepts approved floors" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose version v2.20.0" 0
+run_case "accepts distro package suffix" "go version go1.26.5" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose version 2.40.3+ds1-0ubuntu1~24.04.1" 0
 run_case "rejects old Go" "go version go1.25.9" "v22.12.0" "10.0.0" "Python 3.13.0" "Docker Compose version v2.20.0" 1
 run_case "rejects old Node" "go version go1.26.5" "v22.11.9" "10.0.0" "Python 3.13.0" "Docker Compose version v2.20.0" 1
 run_case "rejects pnpm outside major ten" "go version go1.26.5" "v22.12.0" "9.15.0" "Python 3.13.0" "Docker Compose version v2.20.0" 1
