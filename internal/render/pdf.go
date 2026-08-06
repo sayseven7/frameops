@@ -11,6 +11,8 @@ package render
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -35,7 +38,24 @@ const (
 	converterCPU   = 120
 	converterFile  = 64 << 20
 	converterFiles = 128
+	workerOutput   = 64 << 10
 )
+
+var errWorkerOutputTooLarge = errors.New("document worker output exceeds the accepted limit")
+
+type limitedBuffer struct {
+	strings.Builder
+	limit    int
+	exceeded bool
+}
+
+func (buffer *limitedBuffer) Write(bytes []byte) (int, error) {
+	if buffer.Len()+len(bytes) > buffer.limit {
+		buffer.exceeded = true
+		return 0, errWorkerOutputTooLarge
+	}
+	return buffer.Builder.Write(bytes)
+}
 
 type Worker struct {
 	command string
@@ -112,10 +132,17 @@ func (worker Worker) Convert(ctx context.Context, source, destination string) (R
 		fmt.Sprintf("--nofile=%d", converterFiles),
 		"--", sandboxWorker, "--source", sandboxSource, "--destination", filepath.Join(sandboxOutput, destinationName),
 	)
-	var answer, diagnostics strings.Builder
+	answer := limitedBuffer{limit: workerOutput}
+	diagnostics := limitedBuffer{limit: workerOutput}
 	command.Stdout, command.Stderr = &answer, &diagnostics
 	if err := command.Run(); err != nil {
+		if answer.exceeded || diagnostics.exceeded {
+			return Result{}, errWorkerOutputTooLarge
+		}
 		return Result{}, fmt.Errorf("convert approved report to PDF: %w: %s", err, strings.TrimSpace(diagnostics.String()))
+	}
+	if answer.exceeded || diagnostics.exceeded {
+		return Result{}, errWorkerOutputTooLarge
 	}
 	var result Result
 	if err := json.Unmarshal([]byte(answer.String()), &result); err != nil {
@@ -124,21 +151,33 @@ func (worker Worker) Convert(ctx context.Context, source, destination string) (R
 	if len(result.SHA256) != 64 || result.ByteSize <= 0 || strings.TrimSpace(result.Converter) == "" {
 		return Result{}, errors.New("the document worker reported an incomplete conversion")
 	}
-	converted, err := os.Open(filepath.Join(output, destinationName))
+	converted, err := os.OpenFile(filepath.Join(output, destinationName), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return Result{}, fmt.Errorf("read sandboxed PDF: %w", err)
 	}
 	defer converted.Close() //nolint:errcheck
+	info, err = converted.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return Result{}, errors.New("the document worker produced an invalid PDF output")
+	}
 	pdf, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return Result{}, fmt.Errorf("write converted PDF: %w", err)
 	}
-	size, err := io.Copy(pdf, converted)
+	complete := false
+	defer func() {
+		if !complete {
+			_ = os.Remove(destination)
+		}
+	}()
+	digest := sha256.New()
+	size, err := io.Copy(io.MultiWriter(pdf, digest), io.LimitReader(converted, converterFile+1))
 	if closeErr := pdf.Close(); err == nil {
 		err = closeErr
 	}
-	if err != nil || size != result.ByteSize {
+	if err != nil || size > converterFile || size != result.ByteSize || hex.EncodeToString(digest.Sum(nil)) != result.SHA256 {
 		return Result{}, errors.New("the document worker produced an incomplete PDF")
 	}
+	complete = true
 	return result, nil
 }
