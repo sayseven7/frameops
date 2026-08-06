@@ -54,6 +54,10 @@ export function Workspace({ initialSection = "overview", initialProjectID = "", 
   const text = copy[locale];
 
   useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
+  useEffect(() => {
     if (error) errorRef.current?.focus();
   }, [error]);
 
