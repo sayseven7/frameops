@@ -78,6 +78,25 @@ export type Evidence = {
   byteSize: number;
 };
 
+export type Ingestion = {
+  id: string;
+  engagementId: string;
+  tool: string;
+  formatVersion: string;
+  filename: string;
+  sha256: string;
+  byteSize: number;
+  receivedAt: string;
+  importedBy: string;
+  summary: {
+    read: number;
+    created: number;
+    reused: number;
+    ignored: number;
+    rejected: number;
+  };
+};
+
 export type ReportRevision = {
   id: string;
   filename: string;
@@ -160,6 +179,10 @@ export function readEngagementChecklist(engagementID: string, fetcher?: Fetcher)
 
 export function readReportRevisions(engagementID: string, fetcher?: Fetcher) {
   return requestJSON<{ items: ReportRevision[] | null }>(`/v1/engagements/${encodeURIComponent(engagementID)}/reports`, {}, undefined, fetcher);
+}
+
+export function readIngestions(engagementID: string, fetcher?: Fetcher) {
+  return requestJSON<{ items: Ingestion[] | null }>(`/v1/engagements/${encodeURIComponent(engagementID)}/ingestions`, {}, undefined, fetcher);
 }
 
 export function uploadReportRevision(engagementID: string, file: File, csrf: string, fetcher?: Fetcher) {

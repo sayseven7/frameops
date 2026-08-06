@@ -1,4 +1,4 @@
-import type { Finding, ReportPDF, ReportRevision } from "./api";
+import type { Finding, Ingestion, ReportPDF, ReportRevision } from "./api";
 
 export function operationalQueue(findings: Finding[], reports: ReportRevision[], pdfs: ReportPDF[]) {
   return {
@@ -11,4 +11,8 @@ export function operationalQueue(findings: Finding[], reports: ReportRevision[],
 
 export function formatBytes(bytes: number) {
   return bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+}
+
+export function currentIngestions(activeEngagementID: string, requestedEngagementID: string, items: Ingestion[]) {
+  return activeEngagementID === requestedEngagementID ? items : undefined;
 }
