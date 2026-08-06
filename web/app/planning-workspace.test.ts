@@ -37,6 +37,8 @@ test("supports explicit and system themes without a global motion kill switch", 
   assert.match(styles, /\[data-theme="light"\]/);
   assert.match(styles, /\[data-theme="system"\]/);
   assert.match(styles, /\.app-shell, \.login-shell \{ background:var\(--ink\); color:var\(--text\); \}/);
-  assert.match(styles, /\.app-content:focus-visible \{ outline:0; box-shadow:inset 0 2px var\(--focus\); \}/);
+  assert.match(styles, /\.app-content \{[^}]*border-top:2px solid transparent;/);
+  assert.match(styles, /\.app-content:focus-visible \{ outline:0; border-top-color:var\(--focus\); \}/);
+  assert.doesNotMatch(styles, /\.app-content:focus-visible \{[^}]*box-shadow:/);
   assert.doesNotMatch(styles, /transition-duration:\.01ms|animation-duration:\.01ms/);
 });
