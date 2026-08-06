@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, createProjectPlan, deriveReportPDF, publishMethodology, readEngagementChecklist, readIngestions, readProjectPlan, readReportRevisions, recordRetest, requestJSON, transitionProjectPlan, triageFinding, updateProjectPlan, uploadReportRevision } from "./api.ts";
+import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, createOrganizationMember, createProjectPlan, deriveReportPDF, listOrganizationAuditEvents, listOrganizationMembers, publishMethodology, readEngagementChecklist, readIngestions, readOrganization, readProjectPlan, readReportRevisions, recordRetest, requestJSON, transitionProjectPlan, triageFinding, updateOrganization, updateOrganizationMember, updateProjectPlan, uploadReportRevision } from "./api.ts";
 import { apiErrorMessage } from "./copy.ts";
 
 test("requestJSON keeps the session and sends CSRF for a mutating request", async () => {
@@ -163,4 +164,40 @@ test("report revision adapters list, upload, approve, and derive with the sessio
   assert.match(requests[1].headers.get("Content-Type") ?? "", /^multipart\/form-data; boundary=/);
   assert.notEqual(requests[1].headers.get("Content-Type"), "application/json");
   assert.equal((await requests[1].formData()).get("file") instanceof File, true);
+});
+
+
+test("organization administration adapters keep the session, use scoped routes, and send CSRF", async () => {
+	const requests: Request[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const request = new Request(new URL(input.toString(), "https://frameops.example.test"), init);
+		requests.push(request);
+		return Response.json({ id: "member-id", items: [], nextCursor: "" });
+	};
+	const csrf = "csrf-token";
+
+	await readOrganization(fetcher);
+	await updateOrganization("FrameOPS", csrf, fetcher);
+	await listOrganizationMembers(fetcher);
+	await createOrganizationMember({ displayName: "Operator", email: "operator@example.test", password: "correct horse battery staple", role: "member" }, csrf, fetcher);
+	await updateOrganizationMember("member-id", { role: "admin" }, csrf, fetcher);
+	await listOrganizationAuditEvents({ action: "organization.member.created", limit: 25 }, fetcher);
+
+	assert.deepEqual(requests.map((request) => [request.url, request.method, request.headers.get("X-CSRF-Token"), request.credentials]), [
+		["https://frameops.example.test/v1/organization", "GET", null, "include"],
+		["https://frameops.example.test/v1/organization", "PUT", csrf, "include"],
+		["https://frameops.example.test/v1/organization/members", "GET", null, "include"],
+		["https://frameops.example.test/v1/organization/members", "POST", csrf, "include"],
+		["https://frameops.example.test/v1/organization/members/member-id", "PATCH", csrf, "include"],
+		["https://frameops.example.test/v1/organization/audit-events?action=organization.member.created&limit=25", "GET", null, "include"],
+	]);
+});
+
+test("organization administration keeps locale-aware audit pagination in the UI", async () => {
+	const source = await readFile(new URL("./organization-admin.tsx", import.meta.url), "utf8");
+	assert.match(source, /useState<Locale>\("pt-BR"\)/);
+	assert.match(source, /en: \{ title: "Organization"/);
+	assert.match(source, /Intl\.DateTimeFormat\(locale/);
+	assert.match(source, /listOrganizationAuditEvents\(\{ limit: 25, cursor: nextCursor \}\)/);
+	assert.match(source, /appendAuditPage\(events, page\)/);
 });

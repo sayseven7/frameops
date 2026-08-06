@@ -202,7 +202,7 @@ func Authenticate(ctx context.Context, pool interface {
 	}
 
 	var organizationID, role string
-	if err := pool.QueryRow(ctx, `SELECT organization_id, role FROM organization_memberships WHERE user_id = $1 ORDER BY created_at, organization_id LIMIT 1`, userID).Scan(&organizationID, &role); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT organization_id, role FROM organization_memberships WHERE user_id = $1 AND is_active ORDER BY created_at, organization_id LIMIT 1`, userID).Scan(&organizationID, &role); err != nil {
 		return "", ErrUnauthorized
 	}
 	token, err := randomToken()
@@ -225,7 +225,7 @@ func SessionForToken(ctx context.Context, pool interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, token string) (Session, error) {
 	var session Session
-	if err := pool.QueryRow(ctx, `SELECT sessions.id, sessions.user_id, sessions.organization_id, organization_memberships.role, sessions.csrf_hash FROM sessions JOIN organization_memberships ON organization_memberships.organization_id = sessions.organization_id AND organization_memberships.user_id = sessions.user_id WHERE sessions.token_hash = $1 AND sessions.revoked_at IS NULL AND sessions.expires_at > now()`, tokenHash(token)).Scan(&session.ID, &session.UserID, &session.OrganizationID, &session.Role, &session.CSRFHash); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT sessions.id, sessions.user_id, sessions.organization_id, organization_memberships.role, sessions.csrf_hash FROM sessions JOIN organization_memberships ON organization_memberships.organization_id = sessions.organization_id AND organization_memberships.user_id = sessions.user_id WHERE sessions.token_hash = $1 AND sessions.revoked_at IS NULL AND sessions.expires_at > now() AND organization_memberships.is_active`, tokenHash(token)).Scan(&session.ID, &session.UserID, &session.OrganizationID, &session.Role, &session.CSRFHash); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Session{}, ErrUnauthorized
 		}

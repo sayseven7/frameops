@@ -1,5 +1,5 @@
-import ProtectedWorkspace from "../protected-workspace";
+import ProtectedOrganizationAdmin from "../protected-organization-admin";
 
 export default function OrganizationsPage() {
-  return <ProtectedWorkspace initialSection="clients" />;
+  return <ProtectedOrganizationAdmin />;
 }
