@@ -41,6 +41,23 @@ export type EngagementChecklist = Pick<Methodology, "name" | "sourceName" | "sou
   versionNumber: number;
 };
 
+export type ProjectPlan = {
+  engagementId: string;
+  ownerUserId: string;
+  status: "draft" | "active" | "closed";
+  startsOn: string;
+  endsOn: string;
+  rulesOfEngagement: string;
+  scope: { versionNumber: number; targets: string[]; exclusions: string[]; createdAt: string };
+  team: { userId: string; role: "lead" | "tester" | "reviewer" }[];
+  milestones: { id?: string; title: string; dueOn: string; completedAt?: string | null }[];
+};
+
+export type ProjectPlanInput = Pick<ProjectPlan, "startsOn" | "endsOn" | "rulesOfEngagement" | "team" | "milestones"> & {
+  targets: string[];
+  exclusions: string[];
+};
+
 export type Finding = {
   id: string;
   engagementId: string;
@@ -175,6 +192,22 @@ export function createEngagement(clientID: string, input: EngagementInput, csrf:
 
 export function readEngagementChecklist(engagementID: string, fetcher?: Fetcher) {
   return requestJSON<EngagementChecklist>(`/v1/engagements/${encodeURIComponent(engagementID)}/checklist`, {}, undefined, fetcher);
+}
+
+export function readProjectPlan(engagementID: string, fetcher?: Fetcher) {
+  return requestJSON<ProjectPlan>(`/v1/engagements/${encodeURIComponent(engagementID)}/plan`, {}, undefined, fetcher);
+}
+
+export function createProjectPlan(engagementID: string, input: ProjectPlanInput, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<ProjectPlan>(`/v1/engagements/${encodeURIComponent(engagementID)}/plan`, { method: "POST", body: JSON.stringify(input) }, csrf, fetcher);
+}
+
+export function updateProjectPlan(engagementID: string, input: ProjectPlanInput, csrf: string, fetcher?: Fetcher) {
+  return requestJSON<ProjectPlan>(`/v1/engagements/${encodeURIComponent(engagementID)}/plan`, { method: "PUT", body: JSON.stringify(input) }, csrf, fetcher);
+}
+
+export function transitionProjectPlan(engagementID: string, status: "active" | "closed", csrf: string, fetcher?: Fetcher) {
+  return requestJSON<ProjectPlan>(`/v1/engagements/${encodeURIComponent(engagementID)}/plan/transition`, { method: "POST", body: JSON.stringify({ status }) }, csrf, fetcher);
 }
 
 export function readReportRevisions(engagementID: string, fetcher?: Fetcher) {

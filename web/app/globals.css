@@ -238,4 +238,21 @@ dd { margin:0; color:#dbe7e3; }
   .import-grid { min-width:900px; }
   .detail-pane { padding:16px; }
 }
+
+.planning-shell { width:min(100% - 48px, 980px); margin:0 auto; padding:42px 0 64px; }
+.planning-shell > header { display:grid; gap:8px; margin-bottom:28px; }
+.planning-shell > header > a { color:var(--cyan); text-decoration:none; }
+.planning-form, .planning-record { padding:20px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); }
+.planning-form fieldset { display:grid; gap:14px; min-width:0; margin:0; padding:0; border:0; }
+.planning-form legend { margin-bottom:14px; font-size:1.05rem; font-weight:650; }
+.planning-milestones { display:grid; gap:10px; padding-top:14px; border-top:1px solid var(--line); }
+.planning-milestones > button { width:max-content; min-height:36px; }
+.planning-milestones ul { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+.planning-milestones li { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); }
+.planning-milestones li button { min-height:32px; }
+.planning-record { display:grid; gap:16px; margin-top:18px; }
+.planning-record dl { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px; margin:0; }
+.planning-record dl > div { display:grid; gap:3px; }
+.planning-record > button { width:max-content; border-color:var(--signal); background:var(--signal); color:var(--ink); font-weight:800; }
+@media (max-width:700px) { .planning-shell { width:min(100% - 24px, 980px); padding-top:24px; } .planning-record dl { grid-template-columns:1fr; } }
 @media (prefers-reduced-motion:reduce) { *, *::before, *::after { scroll-behavior:auto !important; transition-duration:.01ms !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; } }
