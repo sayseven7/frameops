@@ -60,6 +60,9 @@ export const copy = {
     errorInvalidCVSS: "Informe um vetor CVSS 3.1 válido.",
     errorInvalidState: "O estado atual não permite esta operação.",
     errorEvidenceTooLarge: "O arquivo de evidência excede o limite de 32 MiB.",
+    errorArtifactTooLarge: "O artefato de importação excede o limite de 8 MiB.",
+    errorInvalidNmapReport: "O artefato não é um relatório XML Nmap aceito.",
+    errorDuplicateArtifact: "Este artefato já foi importado neste projeto.",
     errorForbidden: "Você não tem permissão para esta operação.",
     errorNotFound: "O item solicitado não foi encontrado.",
     noClientSelected: "Selecione um cliente antes de criar um engagement.",
@@ -163,6 +166,20 @@ export const copy = {
     size: "Tamanho",
     captureEvidenceHelp: "Capture um arquivo para iniciar a cadeia deste achado.",
     reportsDescription: "Revisões DOCX, aprovação editorial e derivação do PDF.",
+    imports: "Importações",
+    importsDescription: "Histórico persistido de inventário recebido pela API deste projeto.",
+    importSource: "Origem",
+    importReceivedAt: "Recebido em",
+    importResult: "Registros resultantes",
+    importState: "Estado",
+    importRecorded: "Registrada",
+    importCreated: "criados",
+    importReused: "reutilizados",
+    importIgnored: "ignorados",
+    importRejected: "rejeitados",
+    importsNeedProject: "As importações são carregadas dentro de um projeto ativo.",
+    noImports: "Nenhuma importação persistida neste projeto.",
+    importsCommand: "Use a CLI online já autenticada para enviar um XML Nmap; este comando não contém credenciais.",
     reportsNeedProject: "As revisões são carregadas dentro de um projeto ativo.",
     revision: "Revisão",
     integrity: "Integridade",
@@ -230,6 +247,9 @@ export const copy = {
     errorInvalidCVSS: "Enter a valid CVSS 3.1 vector.",
     errorInvalidState: "The current state does not allow this operation.",
     errorEvidenceTooLarge: "The evidence file exceeds the 32 MiB limit.",
+    errorArtifactTooLarge: "The import artifact exceeds the 8 MiB limit.",
+    errorInvalidNmapReport: "The artifact is not an accepted Nmap XML report.",
+    errorDuplicateArtifact: "This artifact has already been imported into this project.",
     errorForbidden: "You do not have permission for this operation.",
     errorNotFound: "The requested item was not found.",
     noClientSelected: "Select a client before creating an engagement.",
@@ -333,6 +353,20 @@ export const copy = {
     size: "Size",
     captureEvidenceHelp: "Capture a file to begin this finding's chain.",
     reportsDescription: "DOCX revisions, editorial approval, and PDF derivation.",
+    imports: "Imports",
+    importsDescription: "Persisted inventory history received by this project's API.",
+    importSource: "Source",
+    importReceivedAt: "Received at",
+    importResult: "Resulting records",
+    importState: "State",
+    importRecorded: "Recorded",
+    importCreated: "created",
+    importReused: "reused",
+    importIgnored: "ignored",
+    importRejected: "rejected",
+    importsNeedProject: "Imports are loaded within an active project.",
+    noImports: "No imports are persisted for this project.",
+    importsCommand: "Use the already authenticated online CLI to submit an Nmap XML file; this command contains no credentials.",
     reportsNeedProject: "Revisions are loaded within an active project.",
     revision: "Revision",
     integrity: "Integrity",
@@ -357,6 +391,12 @@ export function apiErrorMessage(code: string, locale: Locale) {
       return text.errorInvalidState;
     case "evidence_too_large":
       return text.errorEvidenceTooLarge;
+    case "artifact_too_large":
+      return text.errorArtifactTooLarge;
+    case "invalid_nmap_report":
+      return text.errorInvalidNmapReport;
+    case "duplicate_artifact":
+      return text.errorDuplicateArtifact;
     case "report_too_large":
       return text.errorReportTooLarge;
     case "conversion_failed":

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, deriveReportPDF, publishMethodology, readEngagementChecklist, readReportRevisions, recordRetest, requestJSON, triageFinding, uploadReportRevision } from "./api.ts";
+import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, deriveReportPDF, publishMethodology, readEngagementChecklist, readIngestions, readReportRevisions, recordRetest, requestJSON, triageFinding, uploadReportRevision } from "./api.ts";
 import { apiErrorMessage } from "./copy.ts";
 
 test("requestJSON keeps the session and sends CSRF for a mutating request", async () => {
@@ -95,8 +95,26 @@ test("apiErrorMessage localizes invalid finding state and CVSS errors", () => {
   assert.equal(apiErrorMessage("evidence_too_large", "en"), "The evidence file exceeds the 32 MiB limit.");
 });
 
+test("apiErrorMessage names deterministic Nmap import refusals", () => {
+  assert.equal(apiErrorMessage("invalid_nmap_report", "pt-BR"), "O artefato não é um relatório XML Nmap aceito.");
+  assert.equal(apiErrorMessage("artifact_too_large", "en"), "The import artifact exceeds the 8 MiB limit.");
+  assert.equal(apiErrorMessage("duplicate_artifact", "en"), "This artifact has already been imported into this project.");
+});
+
 test("collectionItems normalizes null items to an empty collection", () => {
   assert.deepEqual(collectionItems<{ id: string }>({ items: null }), []);
+});
+
+test("readIngestions loads the selected engagement's persisted import history", async () => {
+  let request: Request | undefined;
+  await readIngestions("engagement/id", async (input, init) => {
+    request = new Request(new URL(input.toString(), "https://frameops.example.test"), init);
+    return Response.json({ items: [] });
+  });
+
+  assert.equal(request?.url, "https://frameops.example.test/v1/engagements/engagement%2Fid/ingestions");
+  assert.equal(request?.method, "GET");
+  assert.equal(request?.credentials, "include");
 });
 
 test("report revision adapters list, upload, approve, and derive with the session and CSRF", async () => {

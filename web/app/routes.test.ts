@@ -13,6 +13,7 @@ test("projectRoute builds an encoded deep link for every project workspace secti
   assert.equal(projectRoute("engagement", "methodology"), "/projects/engagement/methodology");
   assert.equal(projectRoute("engagement", "findings"), "/projects/engagement/findings");
   assert.equal(projectRoute("engagement", "evidence"), "/projects/engagement/evidence");
+  assert.equal(projectRoute("engagement", "imports"), "/projects/engagement/imports");
   assert.equal(projectRoute("engagement", "reports"), "/projects/engagement/reports");
 });
 
