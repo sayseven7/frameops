@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"hash/crc32"
 	"time"
 )
 
@@ -44,22 +45,23 @@ func Generate(source Source) ([]byte, error) {
 		}
 		document.WriteString(`</w:t></w:r></w:p>`)
 	}
-	document.WriteString(`</w:body></w:document>`)
+	document.WriteString(`<w:sectPr/></w:body></w:document>`)
 
 	parts := [][2]string{
-		{"[Content_Types].xml", `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`},
+		{"[Content_Types].xml", `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`},
 		{"_rels/.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`},
 		{"word/document.xml", document.String()},
 	}
 	var archive bytes.Buffer
 	writer := zip.NewWriter(&archive)
 	for _, part := range parts {
-		header := &zip.FileHeader{Name: part[0], Method: zip.Store, Modified: time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)}
-		entry, err := writer.CreateHeader(header)
+		contents := []byte(part[1])
+		header := &zip.FileHeader{Name: part[0], Method: zip.Store, Modified: time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC), CRC32: crc32.ChecksumIEEE(contents), CompressedSize64: uint64(len(contents)), UncompressedSize64: uint64(len(contents))}
+		entry, err := writer.CreateRaw(header)
 		if err != nil {
 			return nil, fmt.Errorf("create DOCX part: %w", err)
 		}
-		if _, err := entry.Write([]byte(part[1])); err != nil {
+		if _, err := entry.Write(contents); err != nil {
 			return nil, fmt.Errorf("write DOCX part: %w", err)
 		}
 	}

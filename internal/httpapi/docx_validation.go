@@ -22,6 +22,8 @@ const (
 	ooxmlWordNS           = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 	ooxmlDocumentType     = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
 	ooxmlOfficeDocument   = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+	ooxmlXMLContentType   = "application/xml"
+	ooxmlRelsContentType  = "application/vnd.openxmlformats-package.relationships+xml"
 )
 
 var errInvalidDOCX = errors.New("report is not an accepted DOCX archive")
@@ -93,10 +95,7 @@ func readDOCXXML(entry *zip.File) ([]byte, error) {
 func validDOCXPart(name string, contents []byte) bool {
 	switch name {
 	case "[Content_Types].xml":
-		return validOOXMLRelationship(contents,
-			xml.Name{Space: ooxmlContentTypesNS, Local: "Types"},
-			xml.Name{Space: ooxmlContentTypesNS, Local: "Override"},
-			map[string]string{"PartName": "/word/document.xml", "ContentType": ooxmlDocumentType})
+		return validOOXMLContentTypes(contents)
 	case "_rels/.rels":
 		return validOOXMLRelationship(contents,
 			xml.Name{Space: ooxmlRelationshipsNS, Local: "Relationships"},
@@ -106,6 +105,62 @@ func validDOCXPart(name string, contents []byte) bool {
 		return validOOXMLDocument(contents)
 	default:
 		return false
+	}
+}
+
+func validOOXMLContentTypes(contents []byte) bool {
+	decoder := xml.NewDecoder(bytes.NewReader(contents))
+	depth := 0
+	found := map[string]bool{}
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			return depth == 0 && len(found) == 3
+		}
+		if err != nil {
+			return false
+		}
+		switch token := token.(type) {
+		case xml.StartElement:
+			depth++
+			if depth == 1 {
+				if token.Name != (xml.Name{Space: ooxmlContentTypesNS, Local: "Types"}) || !declaresOnlyNamespace(token.Attr, ooxmlContentTypesNS) {
+					return false
+				}
+				continue
+			}
+			if depth != 2 {
+				return false
+			}
+			var key string
+			switch token.Name {
+			case xml.Name{Space: ooxmlContentTypesNS, Local: "Default"}:
+				if exactOOXMLAttributes(token.Attr, map[string]string{"Extension": "xml", "ContentType": ooxmlXMLContentType}) {
+					key = "xml"
+				} else if exactOOXMLAttributes(token.Attr, map[string]string{"Extension": "rels", "ContentType": ooxmlRelsContentType}) {
+					key = "rels"
+				}
+			case xml.Name{Space: ooxmlContentTypesNS, Local: "Override"}:
+				if exactOOXMLAttributes(token.Attr, map[string]string{"PartName": "/word/document.xml", "ContentType": ooxmlDocumentType}) {
+					key = "document"
+				}
+			}
+			if key == "" || found[key] {
+				return false
+			}
+			found[key] = true
+		case xml.EndElement:
+			depth--
+			if depth < 0 {
+				return false
+			}
+		case xml.CharData:
+			if strings.TrimSpace(string(token)) != "" {
+				return false
+			}
+		default:
+			return false
+		}
 	}
 }
 
