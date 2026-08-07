@@ -39,6 +39,11 @@ test("announces protected loading and exposes operational table relationships", 
   for (const role of ["table", "row", "columnheader", "cell"]) assert.match(workspace, new RegExp(`role="${role}"`));
 });
 
+test("renders methodology summaries that omit checklist items without crashing the workspace", () => {
+  const workspace = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+  assert.match(workspace, /methodology\.items\?\.length \?\? "—"/);
+});
+
 test("supports explicit and system themes without a global motion kill switch", () => {
   const styles = readFileSync(new URL("./globals.css", import.meta.url), "utf8");
   assert.match(styles, /\[data-theme="light"\]/);
