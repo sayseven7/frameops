@@ -26,7 +26,7 @@ if ! bash scripts/check-toolchains.sh; then
   exit 1
 fi
 
-for command in docker go pnpm curl od ss base64 sha256sum; do
+for command in docker go pnpm curl od ss base64 sha256sum timeout; do
   require "$command"
 done
 
@@ -124,34 +124,29 @@ EOF
 chmod 600 "$environment"
 
 fifo_dir=$(mktemp -d "$state/fifo.XXXXXX")
-trap 'rm -rf "$fifo_dir"' EXIT
 minio_user_fifo="$fifo_dir/minio-root-user"
 minio_password_fifo="$fifo_dir/minio-root-password"
 mkfifo "$minio_user_fifo" "$minio_password_fifo"
-(
-  cat "$state/minio-root-user" >"$minio_user_fifo"
-) &
-(
-  cat "$state/minio-root-password" >"$minio_password_fifo"
-) &
-FRAMEOPS_MINIO_ROOT_USER_FIFO=$minio_user_fifo \
-FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO=$minio_password_fifo \
-docker compose --project-name "$project" --env-file "$environment" up -d postgres minio
-
-for attempt in {1..30}; do
-  if docker compose --project-name "$project" --env-file "$environment" exec -T postgres psql -U frameops_local -d frameops_local -c 'SELECT 1' >/dev/null && curl --fail --silent --output /dev/null "http://127.0.0.1:$minio_port/minio/health/live"; then
-    break
+cat "$state/minio-root-user" >"$minio_user_fifo" &
+minio_user_writer=$!
+cat "$state/minio-root-password" >"$minio_password_fifo" &
+minio_password_writer=$!
+cleanup_fifos() {
+  kill "$minio_user_writer" "$minio_password_writer" 2>/dev/null || true
+  wait "$minio_user_writer" "$minio_password_writer" 2>/dev/null || true
+  rm -rf "$fifo_dir"
+}
+trap cleanup_fifos EXIT
+if env FRAMEOPS_MINIO_ROOT_USER_FIFO="$minio_user_fifo" FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO="$minio_password_fifo" timeout --foreground 300s docker compose --project-name "$project" --env-file "$environment" up --build --wait; then
+  :
+else
+  compose_status=$?
+  if [[ $compose_status == 124 ]]; then
+    printf 'docker compose up --build --wait timed out after 300s\n' >&2
   fi
-  if [[ $attempt == 30 ]]; then
-    printf 'PostgreSQL or MinIO did not become ready\n' >&2
-    exit 1
-  fi
-  sleep 1
-done
-
-FRAMEOPS_MINIO_ROOT_USER_FIFO=$minio_user_fifo \
-FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO=$minio_password_fifo \
-  docker compose --project-name "$project" --env-file "$environment" up --build --wait
+  exit "$compose_status"
+fi
+cleanup_fifos; trap - EXIT
 set -a
 # shellcheck source=/dev/null
 source "$environment"
