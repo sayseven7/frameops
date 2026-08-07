@@ -8,3 +8,4 @@ web/.next
 bin
 coverage
 .worktrees/
+**/.worktrees/
