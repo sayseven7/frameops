@@ -123,10 +123,13 @@ FRAMEOPS_UI_PORT=$ui_port
 EOF
 chmod 600 "$environment"
 
-fifo_dir=$(mktemp -d "$state/fifo.XXXXXX")
+fifo_dir="$state/fifo"
+mkdir -p "$fifo_dir"
+chmod 700 "$fifo_dir"
 minio_user_fifo="$fifo_dir/minio-root-user"
 minio_password_fifo="$fifo_dir/minio-root-password"
-mkfifo "$minio_user_fifo" "$minio_password_fifo"
+[[ -p $minio_user_fifo ]] || mkfifo "$minio_user_fifo"
+[[ -p $minio_password_fifo ]] || mkfifo "$minio_password_fifo"
 cat "$state/minio-root-user" >"$minio_user_fifo" &
 minio_user_writer=$!
 cat "$state/minio-root-password" >"$minio_password_fifo" &
@@ -134,7 +137,6 @@ minio_password_writer=$!
 cleanup_fifos() {
   kill "$minio_user_writer" "$minio_password_writer" 2>/dev/null || true
   wait "$minio_user_writer" "$minio_password_writer" 2>/dev/null || true
-  rm -rf "$fifo_dir"
 }
 trap cleanup_fifos EXIT
 if env FRAMEOPS_MINIO_ROOT_USER_FIFO="$minio_user_fifo" FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO="$minio_password_fifo" timeout --foreground 300s docker compose --project-name "$project" --env-file "$environment" up --build --wait; then
@@ -146,7 +148,7 @@ else
   fi
   exit "$compose_status"
 fi
-cleanup_fifos; trap - EXIT
+trap - EXIT
 set -a
 # shellcheck source=/dev/null
 source "$environment"

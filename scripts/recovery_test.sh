@@ -10,9 +10,18 @@ fi
 for required in \
   'backup|restore' \
   'FRAMEOPS_LOCAL_STATE_DIR' \
+  'local destination=$1 parent temporary=' \
+  'local backup=$1 temporary=' \
   'pg_dump -Fc' \
   'docker cp "$minio:/data"' \
+  'docker cp "$temporary/minio/data/." "$minio:/data"' \
+  'cat "$state/minio-root-user" > "$state/fifo/minio-root-user" &' \
+  'cat "$state/minio-root-password" > "$state/fifo/minio-root-password" &' \
+  'if ! wait "$minio_user_writer"; then' \
+  'if ! wait "$minio_password_writer"; then' \
+  'docker exec "$api" wget -q -O /dev/null http://127.0.0.1:8080/health' \
   'docker start "$postgres" "$minio"' \
+  'docker start "$api" "$web"' \
   'docker stop "$postgres" >/dev/null || true' \
   'postgres:18.4@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a'; do
   if ! grep -Fq "$required" "$script"; then
@@ -35,7 +44,10 @@ fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-mkdir -p "$work/bin" "$work/state"
+mkdir -p "$work/bin" "$work/state/fifo"
+mkfifo "$work/state/fifo/minio-root-user" "$work/state/fifo/minio-root-password"
+printf 'user\n' >"$work/state/minio-root-user"
+printf 'password\n' >"$work/state/minio-root-password"
 printf 'FRAMEOPS_LOCAL_STATE=1\n' >"$work/state/runtime.env"
 project="frameops-local-$(printf '%s' "$work/state" | sha256sum | cut -d ' ' -f1)"
 
@@ -48,6 +60,7 @@ case "\$*" in
   "compose --project-name $project --env-file $work/state/runtime.env ps -q api") printf 'api-id\\n' ;;
   "compose --project-name $project --env-file $work/state/runtime.env ps -q web") printf 'web-id\\n' ;;
   *' pg_dump -Fc '*) printf 'postgres-backup' ;;
+  "start postgres-id minio-id") cat "$work/state/fifo/minio-root-user" "$work/state/fifo/minio-root-password" >/dev/null ;;
 esac
 EOF
 chmod 700 "$work/bin/docker"
@@ -60,7 +73,8 @@ for required in \
   'exec postgres-id sh -ceu exec pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
   'stop postgres-id minio-id' \
   'cp minio-id:/data' \
-  'start postgres-id minio-id api-id web-id'; do
+  'start postgres-id minio-id' \
+  'start api-id web-id'; do
   if ! grep -Fq "$required" "$work/docker-args"; then
     printf '%s backup must issue scoped command %q\n' "$script" "$required" >&2
     exit 1
@@ -79,8 +93,9 @@ case "\$*" in
   "compose --project-name $project --env-file $work/state/runtime.env ps -q minio") printf 'minio-id\\n' ;;
   "compose --project-name $project --env-file $work/state/runtime.env ps -q api") printf 'api-id\\n' ;;
   "compose --project-name $project --env-file $work/state/runtime.env ps -q web") printf 'web-id\\n' ;;
-  "cp "*)
-    if [[ \$3 == minio-id:/data && ! -d \$2 ]]; then
+  "start postgres-id minio-id") cat "$work/state/fifo/minio-root-user" "$work/state/fifo/minio-root-password" >/dev/null ;;
+  "cp ")
+    if [[ \$2 != */minio/data/. || \$3 != minio-id:/data ]]; then
       exit 44
     fi
     ;;

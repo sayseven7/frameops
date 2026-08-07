@@ -38,8 +38,38 @@ minio=$(compose_id minio)
 api=$(compose_id api)
 web=$(compose_id web)
 
+wait_for_api() {
+  for attempt in {1..30}; do
+    if docker exec "$api" wget -q -O /dev/null http://127.0.0.1:8080/health; then
+      return
+    fi
+    sleep 1
+  done
+  fail "application API did not become healthy after recovery"
+}
+
+start_stores() {
+  local minio_user_writer minio_password_writer
+  cat "$state/minio-root-user" > "$state/fifo/minio-root-user" &
+  minio_user_writer=$!
+  cat "$state/minio-root-password" > "$state/fifo/minio-root-password" &
+  minio_password_writer=$!
+  if ! docker start "$postgres" "$minio" >/dev/null; then
+    kill "$minio_user_writer" "$minio_password_writer" 2>/dev/null || true
+    wait "$minio_user_writer" "$minio_password_writer" 2>/dev/null || true
+    fail "PostgreSQL or MinIO restart failed"
+  fi
+  if ! wait "$minio_user_writer"; then
+    wait "$minio_password_writer" || true
+    fail "MinIO root user writer failed"
+  fi
+  if ! wait "$minio_password_writer"; then
+    fail "MinIO root password writer failed"
+  fi
+}
+
 backup() {
-  local destination=$1 parent temporary
+  local destination=$1 parent temporary=
   [[ ! -e $destination ]] || fail "backup destination already exists: $destination"
   parent=$(dirname "$destination")
   [[ -d $parent ]] || fail "backup parent does not exist: $parent"
@@ -54,7 +84,8 @@ backup() {
   docker stop "$postgres" "$minio" >/dev/null
   mkdir "$temporary/minio"
   if ! docker cp "$minio:/data" "$temporary/minio" || ! tar -C "$temporary" -cf "$temporary/minio.tar" minio; then
-    docker start "$postgres" "$minio" "$api" "$web" >/dev/null
+    start_stores
+    docker start "$api" "$web" >/dev/null
     fail "MinIO backup failed; containers were restarted"
   fi
   rm -rf "$temporary/minio"
@@ -62,12 +93,14 @@ backup() {
   chmod 700 "$temporary"
   mv "$temporary" "$destination"
   trap - EXIT
-  docker start "$postgres" "$minio" "$api" "$web" >/dev/null
+  start_stores
+  docker start "$api" "$web" >/dev/null
+  wait_for_api
   printf 'recovery backup created: %s\n' "$destination"
 }
 
 restore() {
-  local backup=$1 temporary
+  local backup=$1 temporary=
   [[ -d $backup && -f $backup/postgres.dump && -f $backup/minio.tar && -f $backup/SHA256SUMS ]] || fail "invalid recovery backup: $backup"
   (cd "$backup" && sha256sum --check --status SHA256SUMS) || fail "recovery backup checksum verification failed"
   temporary=$(mktemp -d)
@@ -85,10 +118,12 @@ restore() {
   if ! docker run --rm --volumes-from "$minio" alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 sh -ceu 'find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'; then
     fail "restore failed; PostgreSQL and MinIO remain stopped; do not release"
   fi
-  if ! docker cp "$temporary/minio/." "$minio:/data"; then
+  if ! docker cp "$temporary/minio/data/." "$minio:/data"; then
     fail "restore failed; PostgreSQL and MinIO remain stopped; do not release"
   fi
-  docker start "$postgres" "$minio" "$api" "$web" >/dev/null
+  start_stores
+  docker start "$api" "$web" >/dev/null
+  wait_for_api
   trap - EXIT
   rm -rf "$temporary"
   printf 'recovery restore completed: %s\n' "$backup"
