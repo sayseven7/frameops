@@ -132,13 +132,6 @@ func checkSocket(socket string) error {
 
 func renderHandler(response http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodGet && request.URL.Path == "/health" {
-		select {
-		case conversionSlot <- struct{}{}:
-			defer func() { <-conversionSlot }()
-		default:
-			http.Error(response, "renderer unavailable", http.StatusServiceUnavailable)
-			return
-		}
 		workspace, err := os.MkdirTemp("", "frameops-render-health-")
 		if err == nil {
 			defer os.RemoveAll(workspace) //nolint:errcheck

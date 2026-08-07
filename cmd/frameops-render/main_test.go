@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestRendererRejectsConcurrentRenderWhileBusy(t *testing.T) {
 	}
 }
 
-func TestRendererHealthRejectsWhileConversionBusy(t *testing.T) {
+func TestRendererHealthSucceedsWhileConversionBusy(t *testing.T) {
 	t.Setenv("FRAMEOPS_RENDER_SOCKET", "/run/frameops/render.sock")
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "soffice"), []byte("#!/bin/sh\necho 'LibreOffice test'\n"), 0o700); err != nil {
@@ -42,8 +43,48 @@ func TestRendererHealthRejectsWhileConversionBusy(t *testing.T) {
 
 	response := httptest.NewRecorder()
 	renderHandler(response, httptest.NewRequest(http.MethodGet, "/health", nil))
-	if response.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+}
+
+func TestRendererHealthDoesNotMakeConcurrentRenderBusy(t *testing.T) {
+	t.Setenv("FRAMEOPS_RENDER_SOCKET", "/run/frameops/render.sock")
+	bin, signal := t.TempDir(), t.TempDir()
+	started, release := filepath.Join(signal, "started"), filepath.Join(signal, "release")
+	script := "#!/bin/sh\ncase \"$HOME\" in\n  *frameops-render-health-*)\n    : > " + strconv.Quote(started) + "\n    while [ ! -f " + strconv.Quote(release) + " ]; do sleep 0.01; done\n    ;;\nesac\necho 'LibreOffice test'\n"
+	if err := os.WriteFile(filepath.Join(bin, "soffice"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":/bin:/usr/bin")
+	health := make(chan int, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		renderHandler(response, httptest.NewRequest(http.MethodGet, "/health", nil))
+		health <- response.Code
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("health converter did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
+
+	response := httptest.NewRecorder()
+	renderHandler(response, httptest.NewRequest(http.MethodPost, "/render", strings.NewReader("docx")))
+	if response.Code == http.StatusServiceUnavailable {
+		t.Fatalf("render status = %d, want a conversion result", response.Code)
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if status := <-health; status != http.StatusNoContent {
+		t.Fatalf("health status = %d, want %d", status, http.StatusNoContent)
 	}
 }
 
