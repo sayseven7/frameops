@@ -1,5 +1,7 @@
 .PHONY: fmt lint test web-check github-actions-check check
 
+export DOCKER_CONFIG ?= $(shell getent passwd "$$(id -u)" | cut -d: -f6)/.docker
+
 fmt: ## format Go sources
 	go fmt ./...
 
@@ -8,6 +10,7 @@ lint: ## run Go lint
 
 test: ## run all Go tests
 	go test ./...
+	bash scripts/migrations-contract_test.sh
 	bash scripts/check-compose_test.sh
 	bash scripts/local-runtime_test.sh
 	bash scripts/deploy-contract_test.sh

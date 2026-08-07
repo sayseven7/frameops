@@ -38,7 +38,8 @@ done
 
 grep -Fq 'FRAMEOPS_API_URL=http://127.0.0.1:8081 pnpm --filter @frameops/web build' Makefile || { printf 'Makefile web-check must set FRAMEOPS_API_URL\n' >&2; exit 1; }
 grep -Fq 'npm install --global corepack@0.31.0' Dockerfile.web || { printf 'Dockerfile.web must update Corepack before pnpm activation\n' >&2; exit 1; }
-[[ $(grep -Fh 'USER 10001:10001' Dockerfile.api Dockerfile.web | wc -l) == 3 ]] || { printf 'api, migrate, and web runtime stages must run as UID:GID 10001:10001\n' >&2; exit 1; }
+[[ $(grep -Fh 'USER 10001:10001' Dockerfile.api Dockerfile.web | wc -l) == 4 ]] || { printf 'api, renderer, migrate, and web runtime stages must run as UID:GID 10001:10001\n' >&2; exit 1; }
+[[ $(grep -F 'chown 10001:10001 /run/frameops' Dockerfile.api | wc -l) == 2 ]] || { printf 'api and renderer images must own the shared socket directory as UID:GID 10001:10001\n' >&2; exit 1; }
 grep -Fq 'ENV HOME=/tmp' Dockerfile.web || { printf 'Dockerfile.web must provide a writable HOME for non-root Corepack\n' >&2; exit 1; }
 
 grep -Fq 'ui_port=${FRAMEOPS_UI_PORT:-3000}' scripts/local-runtime.sh || { printf 'local runtime must configure a default UI port\n' >&2; exit 1; }

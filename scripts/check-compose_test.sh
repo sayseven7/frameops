@@ -194,6 +194,44 @@ elif os.environ["MUTATION"] == "api-public-port":
         "    ports:\n      - \"127.0.0.1:${FRAMEOPS_API_PORT:?set FRAMEOPS_API_PORT in .env}:8080\"\n      - \"8082:8080\"\n",
         1,
     )
+elif os.environ["MUTATION"] == "minio-auto-restart":
+    mutated = source.replace(
+        "  minio:\n    restart: \"no\"\n",
+        "  minio:\n    restart: unless-stopped\n",
+        1,
+    )
+elif os.environ["MUTATION"] == "api-capabilities":
+    mutated = source.replace(
+        "      target: api\n    user: \"10001:10001\"\n",
+        "      target: api\n    user: \"10001:10001\"\n    cap_add: [ALL]\n",
+        1,
+    )
+elif os.environ["MUTATION"] == "renderer-network":
+    mutated = source.replace(
+        "    network_mode: none\n",
+        "    network_mode: bridge\n",
+        1,
+    )
+elif os.environ["MUTATION"] == "renderer-cpu":
+    marker = "  renderer:\n"
+    start = source.index(marker)
+    mutated = source[:start] + source[start:].replace('          cpus: "1.00"\n', '          cpus: "0.99"\n', 1)
+elif os.environ["MUTATION"] == "renderer-memory":
+    marker = "  renderer:\n"
+    start = source.index(marker)
+    mutated = source[:start] + source[start:].replace("          memory: 1G\n", "          memory: 999M\n", 1)
+elif os.environ["MUTATION"] == "renderer-pids":
+    mutated = source.replace("    pids_limit: 128\n", "    pids_limit: 129\n", 1).replace("          pids: 128\n", "          pids: 129\n", 1)
+elif os.environ["MUTATION"] == "renderer-tmpfs":
+    mutated = source.replace("      - /tmp:size=256m,mode=1777\n", "      - /tmp\n", 1)
+elif os.environ["MUTATION"] == "renderer-writable-root":
+    marker = "  renderer:\n"
+    start = source.index(marker)
+    mutated = source[:start] + source[start:].replace("    read_only: true\n", "    read_only: false\n", 1)
+elif os.environ["MUTATION"] == "renderer-capabilities":
+    marker = "  renderer:\n"
+    start = source.index(marker)
+    mutated = source[:start] + source[start:].replace("    cap_drop: [ALL]\n", "", 1)
 else:
     raise SystemExit(f"unknown mutation: {os.environ['MUTATION']}")
 if mutated == source:
@@ -215,3 +253,12 @@ PY
 
 expect_api_contract_rejection api-migrate-readiness migrate-readiness "services.api.depends_on.migrate.condition must equal service_completed_successfully"
 expect_api_contract_rejection api-public-port api-public-port "services.api must expose exactly one loopback TCP port mapping to target 8080"
+expect_api_contract_rejection minio-auto-restart minio-auto-restart "services.minio.restart must equal 'no' while root credentials use one-shot FIFOs"
+expect_api_contract_rejection api-capabilities api-capabilities "services.api must not add capabilities or security options"
+expect_api_contract_rejection renderer-network renderer-network "services.renderer.network_mode must equal 'none'"
+expect_api_contract_rejection renderer-cpu renderer-cpu "services.renderer.deploy.resources.limits.cpus must equal '1.00'"
+expect_api_contract_rejection renderer-memory renderer-memory "services.renderer.deploy.resources.limits.memory must equal '1G'"
+expect_api_contract_rejection renderer-pids renderer-pids "services.renderer.pids_limit must equal 128"
+expect_api_contract_rejection renderer-tmpfs renderer-tmpfs "services.renderer.tmpfs must equal '/tmp:size=256m,mode=1777'"
+expect_api_contract_rejection renderer-writable-root renderer-writable-root "services.renderer.read_only must equal true"
+expect_api_contract_rejection renderer-capabilities renderer-capabilities "services.renderer.cap_drop must equal ['ALL']"

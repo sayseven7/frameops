@@ -27,6 +27,7 @@ services:
       start_period: 5s
 
   minio:
+    restart: "no"
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data
     deploy:
@@ -37,7 +38,6 @@ services:
         reservations:
           cpus: "0.25"
           memory: 512M
-    restart: unless-stopped
     stop_grace_period: 10s
     environment:
       MINIO_ROOT_USER_FILE: /run/secrets/minio-root-user
@@ -78,11 +78,44 @@ services:
         condition: service_healthy
     command: ["up"]
 
+  renderer:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      target: renderer
+    user: "10001:10001"
+    network_mode: none
+    cap_drop: [ALL]
+    read_only: true
+    pids_limit: 128
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+          pids: 128
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    restart: unless-stopped
+    stop_grace_period: 10s
+    environment:
+      FRAMEOPS_RENDER_SOCKET: /run/frameops/render.sock
+    command: ["--serve"]
+    volumes:
+      - frameops-render-socket:/run/frameops
+    healthcheck:
+      test: ["CMD", "/frameops-render", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
       target: api
+    user: "10001:10001"
     restart: unless-stopped
     stop_grace_period: 10s
     environment:
@@ -94,7 +127,9 @@ services:
       FRAMEOPS_EVIDENCE_S3_SECRET_KEY: ${FRAMEOPS_EVIDENCE_S3_SECRET_KEY:?set FRAMEOPS_EVIDENCE_S3_SECRET_KEY in .env}
       FRAMEOPS_OBJECT_RETENTION_DAYS: ${FRAMEOPS_OBJECT_RETENTION_DAYS:?set FRAMEOPS_OBJECT_RETENTION_DAYS in .env}
       FRAMEOPS_HTTP_ADDR: 0.0.0.0:8080
-      FRAMEOPS_PDF_WORKER: /frameops-render
+      FRAMEOPS_PDF_SOCKET: /run/frameops/render.sock
+    volumes:
+      - frameops-render-socket:/run/frameops
     ports:
       - "127.0.0.1:${FRAMEOPS_API_PORT:?set FRAMEOPS_API_PORT in .env}:8080"
     depends_on:
@@ -104,6 +139,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      renderer:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health"]
       interval: 5s
@@ -138,3 +175,4 @@ services:
 volumes:
   frameops-postgres-data:
   frameops-minio-data:
+  frameops-render-socket:

@@ -100,6 +100,8 @@ minio = config.get("services", {}).get("minio")
 if minio is None:
     errors.append("missing services.minio")
 else:
+    if minio.get("restart") != "no":
+        errors.append("services.minio.restart must equal 'no' while root credentials use one-shot FIFOs")
     validate_resources("minio", minio)
     expected = "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
     image = minio.get("image", "")
@@ -154,7 +156,65 @@ else:
 if "frameops-minio-data" not in config.get("volumes", {}):
     errors.append("missing volumes.frameops-minio-data")
 
+renderer = config.get("services", {}).get("renderer", {})
+if renderer.get("network_mode") != "none":
+    errors.append("services.renderer.network_mode must equal 'none'")
+if renderer.get("user") != "10001:10001":
+    errors.append("services.renderer.user must equal '10001:10001'")
+renderer_limits = renderer.get("deploy", {}).get("resources", {}).get("limits", {})
+try:
+    renderer_cpu = Decimal(str(renderer_limits.get("cpus")))
+except (InvalidOperation, TypeError, ValueError):
+    renderer_cpu = None
+if renderer_cpu != Decimal("1.00"):
+    errors.append("services.renderer.deploy.resources.limits.cpus must equal '1.00'")
+try:
+    renderer_memory = int(renderer_limits.get("memory"))
+except (TypeError, ValueError):
+    renderer_memory = None
+if renderer_memory != 1024**3:
+    errors.append("services.renderer.deploy.resources.limits.memory must equal '1G'")
+if renderer.get("pids_limit") != 128 or renderer_limits.get("pids") != 128:
+    errors.append("services.renderer.pids_limit must equal 128")
+if renderer.get("tmpfs") != ["/tmp:size=256m,mode=1777"]:
+    errors.append("services.renderer.tmpfs must equal '/tmp:size=256m,mode=1777'")
+if renderer.get("read_only") is not True:
+    errors.append("services.renderer.read_only must equal true")
+if renderer.get("cap_drop") != ["ALL"]:
+    errors.append("services.renderer.cap_drop must equal ['ALL']")
+if renderer.get("build", {}).get("target") != "renderer" or renderer.get("command") != ["--serve"]:
+    errors.append("services.renderer must use the dedicated renderer image target and serve command")
+if renderer.get("environment") != {"FRAMEOPS_RENDER_SOCKET": "/run/frameops/render.sock"}:
+    errors.append("services.renderer environment must contain only FRAMEOPS_RENDER_SOCKET")
+renderer_mount = renderer.get("volumes", [])
+if renderer_mount != [{"type": "volume", "source": "frameops-render-socket", "target": "/run/frameops", "volume": {}}]:
+    errors.append("services.renderer must mount only frameops-render-socket at /run/frameops")
+expected_renderer_health = {
+    "test": ["CMD", "/frameops-render", "--healthcheck"],
+    "interval": "5s",
+    "timeout": "3s",
+    "retries": 10,
+    "start_period": "10s",
+}
+if renderer.get("healthcheck") != expected_renderer_health:
+    errors.append("services.renderer.healthcheck must probe the live Unix socket renderer")
+if any(key in renderer for key in ("ports", "networks", "cap_add", "security_opt")):
+    errors.append("services.renderer must have no ports, networks, added capabilities, or security options")
+if "frameops-render-socket" not in config.get("volumes", {}):
+    errors.append("missing volumes.frameops-render-socket")
+
 api = config.get("services", {}).get("api", {})
+if "cap_add" in api or "security_opt" in api:
+    errors.append("services.api must not add capabilities or security options")
+if api.get("user") != "10001:10001":
+    errors.append("services.api.user must equal '10001:10001'")
+if api.get("environment", {}).get("FRAMEOPS_PDF_SOCKET") != "/run/frameops/render.sock" or "FRAMEOPS_PDF_WORKER" in api.get("environment", {}):
+    errors.append("services.api must configure only FRAMEOPS_PDF_SOCKET at /run/frameops/render.sock")
+api_render_mount = api.get("volumes", [])
+if api_render_mount != [{"type": "volume", "source": "frameops-render-socket", "target": "/run/frameops", "volume": {}}]:
+    errors.append("services.api must mount only frameops-render-socket at /run/frameops")
+if api.get("depends_on", {}).get("renderer", {}).get("condition") != "service_healthy":
+    errors.append("services.api.depends_on.renderer.condition must equal service_healthy")
 if api.get("depends_on", {}).get("migrate", {}).get("condition") != "service_completed_successfully":
     errors.append("services.api.depends_on.migrate.condition must equal service_completed_successfully")
 api_ports = api.get("ports", [])

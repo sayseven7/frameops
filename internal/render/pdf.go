@@ -17,9 +17,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -39,6 +42,7 @@ const (
 	converterFile  = 64 << 20
 	converterFiles = 128
 	workerOutput   = 64 << 10
+	maxSourceBytes = 32 << 20
 )
 
 var errWorkerOutputTooLarge = errors.New("document worker output exceeds the accepted limit")
@@ -59,6 +63,8 @@ func (buffer *limitedBuffer) Write(bytes []byte) (int, error) {
 
 type Worker struct {
 	command string
+	socket  string
+	client  *http.Client
 }
 
 // Result is the provenance of one conversion: the converter that produced the
@@ -73,7 +79,23 @@ type Result struct {
 // refuses to start without it: a PDF is only ever a conversion of an approved
 // DOCX, so there is no degraded mode that renders one some other way.
 func FromEnv() (Worker, error) {
+	if socket := os.Getenv("FRAMEOPS_PDF_SOCKET"); socket != "" {
+		if os.Getenv("FRAMEOPS_PDF_WORKER") != "" {
+			return Worker{}, errors.New("configure only one of FRAMEOPS_PDF_SOCKET and FRAMEOPS_PDF_WORKER")
+		}
+		return NewSocket(socket)
+	}
 	return New(os.Getenv("FRAMEOPS_PDF_WORKER"))
+}
+
+func NewSocket(socket string) (Worker, error) {
+	if !filepath.IsAbs(socket) {
+		return Worker{}, errors.New("FRAMEOPS_PDF_SOCKET must be an absolute Unix socket path")
+	}
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
+	return Worker{socket: socket, client: &http.Client{Transport: transport}}, nil
 }
 
 func New(command string) (Worker, error) {
@@ -87,18 +109,125 @@ func New(command string) (Worker, error) {
 	return Worker{command: command}, nil
 }
 
-// Convert runs the worker over the DOCX at source and writes the PDF to
-// destination. Bubblewrap gives the worker only the source, destination and
-// system libraries it needs; its empty network namespace and filesystem keep it
-// from reaching PostgreSQL, object storage or host credentials.
+func (worker Worker) Ready() error {
+	if worker.socket != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://renderer/health", nil)
+		response, err := worker.client.Do(request)
+		if err != nil {
+			return fmt.Errorf("document renderer is unavailable: %w", err)
+		}
+		defer response.Body.Close() //nolint:errcheck
+		if response.StatusCode != http.StatusNoContent {
+			return fmt.Errorf("document renderer is unavailable: status %d", response.StatusCode)
+		}
+		return nil
+	}
+	for _, path := range []string{worker.command, bubblewrapPath, "/usr/bin/prlimit", "/usr/bin/soffice"} {
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+			return fmt.Errorf("document worker runtime is unavailable: %s", path)
+		}
+	}
+	for _, path := range []string{"/usr", "/lib", "/lib64", "/etc/ld.so.cache", "/etc/libreoffice"} {
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("document worker runtime is unavailable: %s", path)
+		}
+	}
+	return nil
+}
+
 func (worker Worker) Convert(ctx context.Context, source, destination string) (Result, error) {
-	if worker.command == "" {
-		return Result{}, errors.New("the document worker is not configured")
+	if worker.socket != "" {
+		return worker.convertSocket(ctx, source, destination)
 	}
-	info, err := os.Stat(bubblewrapPath)
-	if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
-		return Result{}, errors.New("the document worker requires bubblewrap isolation")
+	return worker.convertProcess(ctx, source, destination)
+}
+
+func (worker Worker) convertSocket(ctx context.Context, source, destination string) (Result, error) {
+	input, err := os.Open(source)
+	if err != nil {
+		return Result{}, fmt.Errorf("read source document: %w", err)
 	}
+	defer input.Close() //nolint:errcheck
+	info, err := input.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxSourceBytes {
+		return Result{}, errors.New("the source document is empty, invalid, or larger than the accepted size")
+	}
+	ctx, cancel := context.WithTimeout(ctx, workerTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://renderer/render", io.NopCloser(io.LimitReader(input, maxSourceBytes+1)))
+	if err != nil {
+		return Result{}, fmt.Errorf("create render request: %w", err)
+	}
+	request.ContentLength = info.Size()
+	request.Header.Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+	response, err := worker.client.Do(request)
+	if err != nil {
+		return Result{}, fmt.Errorf("render approved report: %w", err)
+	}
+	defer response.Body.Close() //nolint:errcheck
+	if response.StatusCode != http.StatusOK {
+		diagnostic, _ := io.ReadAll(io.LimitReader(response.Body, workerOutput))
+		return Result{}, fmt.Errorf("render approved report: status %d: %s", response.StatusCode, strings.TrimSpace(string(diagnostic)))
+	}
+	result := Result{Converter: response.Header.Get("X-Frameops-Converter"), SHA256: response.Header.Get("X-Frameops-SHA256")}
+	result.ByteSize, err = strconv.ParseInt(response.Header.Get("X-Frameops-Byte-Size"), 10, 64)
+	decoded, digestErr := hex.DecodeString(result.SHA256)
+	if err != nil || digestErr != nil || len(decoded) != sha256.Size || hex.EncodeToString(decoded) != result.SHA256 || result.ByteSize <= 0 || result.ByteSize > converterFile || strings.TrimSpace(result.Converter) == "" || len(result.Converter) > 1024 {
+		return Result{}, errors.New("the document renderer reported invalid provenance")
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(destination), ".frameops-pdf-")
+	if err != nil {
+		return Result{}, fmt.Errorf("stage converted PDF: %w", err)
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName) //nolint:errcheck
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return Result{}, fmt.Errorf("stage converted PDF: %w", err)
+	}
+	digest := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(temporary, digest), io.LimitReader(response.Body, converterFile+1))
+	closeErr := temporary.Close()
+	if copyErr != nil || closeErr != nil || size != result.ByteSize || size > converterFile || hex.EncodeToString(digest.Sum(nil)) != result.SHA256 {
+		return Result{}, errors.New("the document renderer returned bytes that do not match their provenance")
+	}
+	staged, err := os.Open(temporaryName)
+	if err != nil {
+		return Result{}, fmt.Errorf("read verified PDF: %w", err)
+	}
+	defer staged.Close() //nolint:errcheck
+	pdf, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return Result{}, fmt.Errorf("write converted PDF: %w", err)
+	}
+	complete := false
+	defer func() {
+		_ = pdf.Close()
+		if !complete {
+			_ = os.Remove(destination)
+		}
+	}()
+	if _, err := io.Copy(pdf, staged); err != nil {
+		return Result{}, fmt.Errorf("write converted PDF: %w", err)
+	}
+	if err := pdf.Close(); err != nil {
+		return Result{}, fmt.Errorf("write converted PDF: %w", err)
+	}
+	complete = true
+	return result, nil
+}
+
+// Convert runs the local worker over the DOCX at source and writes the PDF to
+// destination. This process mode remains available for non-Compose development.
+func (worker Worker) convertProcess(ctx context.Context, source, destination string) (Result, error) {
+	if err := worker.Ready(); err != nil {
+		return Result{}, err
+	}
+	var info os.FileInfo
+	var err error
 	output, err := os.MkdirTemp("", "frameops-pdf-output-")
 	if err != nil {
 		return Result{}, fmt.Errorf("create conversion output workspace: %w", err)
