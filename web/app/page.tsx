@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-import { approveReportRevision, captureEvidence, collectionItems, createEngagement as createEngagementRequest, createFinding, createMethodology, deriveReportPDF, generateReportRevision, publishMethodology, readEvidence, readEngagementChecklist, readIngestions, readReportRevisions, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Evidence, type Finding, type FindingInput, type Ingestion, type Methodology, type MethodologyInput, type ReportPDF, type ReportRevision, type Retest, type RetestInput, requestJSON, uploadReportRevision } from "./api";
+import { approveReportRevision, captureEvidence, collectionItems, createEngagement as createEngagementRequest, createFinding, createMethodology, deriveReportPDF, generateReportRevision, publishMethodology, readEvidence, readEngagementChecklist, readIngestions, readReportRevisions, readWorkspaceContext, recordRetest, triageFinding, type Client, type Engagement, type EngagementChecklist, type Evidence, type Finding, type FindingInput, type Ingestion, type Methodology, type MethodologyInput, type ReportPDF, type ReportRevision, type Retest, type RetestInput, requestJSON, uploadReportRevision } from "./api";
 import { apiErrorMessage, copy, stateLabel, type Locale } from "./copy";
 import { currentIngestions, formatBytes, operationalQueue } from "./operations";
 import RootRedirect from "./root-redirect";
@@ -94,6 +94,24 @@ export function Workspace({ initialSection = "overview", initialProjectID = "", 
   async function loadMethodologies() {
     setMethodologies(collectionItems(await requestJSON<Collection<Methodology>>("/v1/methodology-templates")));
   }
+
+  useEffect(() => {
+    let active = true;
+    void readWorkspaceContext(initialProjectID).then((context) => {
+      if (!active) return;
+      setClients(context.clients);
+      setMethodologies(context.methodologies);
+      if (context.clientID) {
+        setClientID(context.clientID);
+        setEngagements(context.engagements);
+      }
+    }).catch((reason) => {
+      if (active) setError(apiErrorMessage(reason instanceof Error ? reason.message : "", locale));
+    });
+    return () => { active = false; };
+    // Session restoration happens once per routed workspace mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialProjectID]);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
