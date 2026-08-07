@@ -27,14 +27,14 @@ export type Methodology = {
   sourceName: string;
   sourceVersion: string;
   attribution: string;
-  items: MethodologyItem[];
+  items?: MethodologyItem[];
 };
 
-export type MethodologyInput = Pick<Methodology, "name" | "sourceName" | "sourceVersion" | "attribution" | "items">;
+export type MethodologyInput = Pick<Methodology, "name" | "sourceName" | "sourceVersion" | "attribution"> & { items: MethodologyItem[] };
 
 export type EngagementInput = Pick<Engagement, "name"> & { methodologyVersionId: string };
 
-export type EngagementChecklist = Pick<Methodology, "name" | "sourceName" | "sourceVersion" | "attribution" | "items"> & {
+export type EngagementChecklist = Pick<Methodology, "name" | "sourceName" | "sourceVersion" | "attribution"> & { items: MethodologyItem[] } & {
   id: string;
   engagementId: string;
   templateVersionId: string;
