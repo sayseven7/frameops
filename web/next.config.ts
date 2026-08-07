@@ -17,7 +17,8 @@ try {
 if (!/^https?:$/.test(apiURL.protocol) || apiURL.origin !== configuredAPIURL.replace(/\/$/, "")) {
   throw new Error("FRAMEOPS_API_URL must be a valid HTTP(S) origin");
 }
-if (apiURL.protocol === "http:" && !loopback(apiURL.hostname)) {
+const composeInternalAPI = apiURL.origin === "http://api:8080" && process.env.FRAMEOPS_COMPOSE_INTERNAL_API === "1";
+if (apiURL.protocol === "http:" && !loopback(apiURL.hostname) && !composeInternalAPI) {
   throw new Error("FRAMEOPS_API_URL must use https outside loopback");
 }
 

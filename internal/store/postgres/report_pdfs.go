@@ -25,9 +25,10 @@ type ReportPDF struct {
 	ByteSize     int64      `json:"byteSize"`
 	DerivedAt    time.Time  `json:"derivedAt"`
 	StoredAt     *time.Time `json:"storedAt"`
+	FailedAt     *time.Time `json:"failedAt"`
 }
 
-const reportPDFColumns = `id, engagement_id, revision_id, state, storage_key, encode(source_sha256, 'hex'), converter, encode(sha256, 'hex'), byte_size, derived_at, stored_at`
+const reportPDFColumns = `id, engagement_id, revision_id, state, storage_key, encode(source_sha256, 'hex'), converter, encode(sha256, 'hex'), byte_size, derived_at, stored_at, failed_at`
 
 // ApprovedReportRevision reads the one revision a PDF may be derived from. A
 // revision owned by another organization is indistinguishable from a missing
@@ -54,8 +55,8 @@ func ApprovedReportRevision(ctx context.Context, pool interface {
 // ReserveReportPDF records the provenance of one finished conversion before its
 // bytes reach the object store. The insert takes the source digest from the
 // revision row itself, so the recorded provenance cannot describe any bytes
-// other than the approved ones, and it only accepts a revision that is still
-// approved and has no delivered PDF yet.
+// other than the approved ones, and the unique constraint reserves a revision
+// before a second request can leave another pending conversion behind.
 func ReserveReportPDF(ctx context.Context, pool interface {
 	Begin(context.Context) (pgx.Tx, error)
 }, session Session, revisionID, converter, digest string, byteSize int64) (ReportPDF, error) {
@@ -64,6 +65,18 @@ func ReserveReportPDF(ctx context.Context, pool interface {
 		return ReportPDF{}, fmt.Errorf("begin report pdf reservation: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	var expiredID, expiredRevisionID, expiredStorageKey string
+	err = tx.QueryRow(ctx, `UPDATE report_pdfs SET state = 'failed', failed_at = now() WHERE organization_id = $1 AND revision_id = $2 AND state = 'pending' AND derived_at <= now() - interval '5 minutes' RETURNING id, revision_id, storage_key`,
+		session.OrganizationID, revisionID).Scan(&expiredID, &expiredRevisionID, &expiredStorageKey)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return ReportPDF{}, fmt.Errorf("recover stale report pdf reservation: %w", err)
+	}
+	if err == nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'report.pdf.failed', 'report_pdf', $3, 'failure', gen_random_uuid(), jsonb_build_object('revisionId', $4::uuid, 'storageKey', $5::text, 'reason', 'reservation_expired'))`,
+			session.OrganizationID, session.UserID, expiredID, expiredRevisionID, expiredStorageKey); err != nil {
+			return ReportPDF{}, fmt.Errorf("audit stale report pdf reservation: %w", err)
+		}
+	}
 	var pdf ReportPDF
 	err = tx.QueryRow(ctx, `INSERT INTO report_pdfs (organization_id, engagement_id, revision_id, source_sha256, converter, sha256, byte_size, derived_by)
 		SELECT $1, revision.engagement_id, revision.id, revision.sha256, $3, decode($4, 'hex'), $5, $6
@@ -71,7 +84,7 @@ func ReserveReportPDF(ctx context.Context, pool interface {
 		WHERE revision.organization_id = $1 AND revision.id = $2 AND revision.approved_at IS NOT NULL
 		  AND NOT EXISTS (SELECT 1 FROM report_pdfs delivered WHERE delivered.organization_id = revision.organization_id AND delivered.revision_id = revision.id AND delivered.state = 'stored')
 		RETURNING `+reportPDFColumns, session.OrganizationID, revisionID, converter, digest, byteSize, session.UserID).Scan(scanReportPDF(&pdf)...)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || isReportPDFUniqueViolation(err) {
 		return ReportPDF{}, ErrInvalidState
 	}
 	if err != nil {
@@ -88,10 +101,7 @@ func ReserveReportPDF(ctx context.Context, pool interface {
 }
 
 // ConfirmReportPDF advances one reserved conversion to 'stored' after the object
-// store accepted exactly the bytes its digest describes. Two conversions of the
-// same revision that raced past the reservation predicate meet the unique index
-// here, and the loser is reported as an invalid state instead of a second
-// delivered PDF.
+// store accepted exactly the bytes its digest describes.
 func ConfirmReportPDF(ctx context.Context, pool interface {
 	Begin(context.Context) (pgx.Tx, error)
 }, session Session, pdfID string) (ReportPDF, error) {
@@ -119,11 +129,40 @@ func ConfirmReportPDF(ctx context.Context, pool interface {
 	return pdf, nil
 }
 
+// FailReportPDF retires one tenant-owned pending reservation without deleting or
+// rewriting its provenance, allowing a later conversion to reserve the revision.
+func FailReportPDF(ctx context.Context, pool interface {
+	Begin(context.Context) (pgx.Tx, error)
+}, session Session, pdfID string) (ReportPDF, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return ReportPDF{}, fmt.Errorf("begin report pdf failure: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var pdf ReportPDF
+	err = tx.QueryRow(ctx, `UPDATE report_pdfs SET state = 'failed', failed_at = now() WHERE organization_id = $1 AND id = $2 AND state = 'pending' RETURNING `+reportPDFColumns,
+		session.OrganizationID, pdfID).Scan(scanReportPDF(&pdf)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ReportPDF{}, ErrInvalidState
+	}
+	if err != nil {
+		return ReportPDF{}, fmt.Errorf("fail report pdf: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, outcome, correlation_id, context) VALUES ($1, $2, 'report.pdf.failed', 'report_pdf', $3, 'failure', gen_random_uuid(), jsonb_build_object('revisionId', $4::uuid, 'storageKey', $5::text))`,
+		session.OrganizationID, session.UserID, pdf.ID, pdf.RevisionID, pdf.StorageKey); err != nil {
+		return ReportPDF{}, fmt.Errorf("audit report pdf failure: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ReportPDF{}, fmt.Errorf("commit report pdf failure: %w", err)
+	}
+	return pdf, nil
+}
+
 func isReportPDFUniqueViolation(err error) bool {
 	var databaseError *pgconn.PgError
-	return errors.As(err, &databaseError) && databaseError.Code == "23505" && databaseError.ConstraintName == "report_pdfs_one_stored_per_revision_idx"
+	return errors.As(err, &databaseError) && databaseError.Code == "23505" && databaseError.ConstraintName == "report_pdfs_one_effective_per_revision_key"
 }
 
 func scanReportPDF(pdf *ReportPDF) []any {
-	return []any{&pdf.ID, &pdf.EngagementID, &pdf.RevisionID, &pdf.State, &pdf.StorageKey, &pdf.SourceSHA256, &pdf.Converter, &pdf.SHA256, &pdf.ByteSize, &pdf.DerivedAt, &pdf.StoredAt}
+	return []any{&pdf.ID, &pdf.EngagementID, &pdf.RevisionID, &pdf.State, &pdf.StorageKey, &pdf.SourceSHA256, &pdf.Converter, &pdf.SHA256, &pdf.ByteSize, &pdf.DerivedAt, &pdf.StoredAt, &pdf.FailedAt}
 }

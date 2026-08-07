@@ -17,7 +17,10 @@ import (
 	"github.com/sayseven7/frameops/internal/store/postgres"
 )
 
-const sessionCookieName = "__Host-frameops_session"
+const (
+	sessionCookieName = "__Host-frameops_session"
+	readinessTimeout  = time.Second
+)
 
 type Server struct {
 	pool     *pgxpool.Pool
@@ -28,11 +31,20 @@ type Server struct {
 
 func New(pool *pgxpool.Pool, evidence objectstore.Bucket, renderer render.Worker) http.Handler {
 	return Server{pool: pool, evidence: evidence, renderer: renderer, ready: func() error {
-		if err := pool.Ping(context.Background()); err != nil {
+		if err := readinessProbe(pool.Ping); err != nil {
 			return err
 		}
-		return evidence.Ready(context.Background())
+		if err := readinessProbe(evidence.Ready); err != nil {
+			return err
+		}
+		return renderer.Ready()
 	}}
+}
+
+func readinessProbe(probe func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), readinessTimeout)
+	defer cancel()
+	return probe(ctx)
 }
 
 func (server Server) ServeHTTP(response http.ResponseWriter, request *http.Request) {

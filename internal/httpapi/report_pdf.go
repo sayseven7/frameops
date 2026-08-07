@@ -69,6 +69,14 @@ func (server Server) reportPDF(response http.ResponseWriter, request *http.Reque
 		writeError(response, http.StatusInternalServerError, "internal_error")
 		return
 	}
+	confirmed := false
+	defer func() {
+		if !confirmed {
+			recoveryContext, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), readinessTimeout)
+			defer cancel()
+			_, _ = postgres.FailReportPDF(recoveryContext, server.pool, session, pdf.ID)
+		}
+	}()
 	file, err := os.Open(filepath.Join(workspace, "approved.pdf"))
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "internal_error")
@@ -88,6 +96,7 @@ func (server Server) reportPDF(response http.ResponseWriter, request *http.Reque
 		writeError(response, http.StatusInternalServerError, "internal_error")
 		return
 	}
+	confirmed = true
 	writeJSON(response, http.StatusCreated, pdf)
 }
 

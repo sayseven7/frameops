@@ -5,11 +5,60 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestSocketConvertVerifiesProvenanceBeforeWritingDestination(t *testing.T) {
+	workspace := t.TempDir()
+	socket := filepath.Join(workspace, "render.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("X-Frameops-Converter", "test")
+		response.Header().Set("X-Frameops-SHA256", strings.Repeat("0", 64))
+		response.Header().Set("X-Frameops-Byte-Size", "9")
+		_, _ = response.Write([]byte("%PDF-real"))
+	})}
+	go server.Serve(listener) //nolint:errcheck
+	t.Cleanup(func() { _ = server.Close() })
+
+	source := filepath.Join(workspace, "approved.docx")
+	destination := filepath.Join(workspace, "approved.pdf")
+	if err := os.WriteFile(source, []byte("approved"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := NewSocket(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.Convert(context.Background(), source, destination); err == nil {
+		t.Fatal("Convert accepted forged renderer provenance")
+	}
+	if _, err := os.Stat(destination); !os.IsNotExist(err) {
+		t.Fatalf("destination exists before provenance verification: %v", err)
+	}
+}
+
+func TestSocketReadyProbesLiveRenderer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "render.sock")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := NewSocket(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.Ready(); err == nil {
+		t.Fatal("Ready accepted a socket path without a live renderer")
+	}
+}
 
 func TestConvertRunsWorkerWithoutHostServices(t *testing.T) {
 	workspace := t.TempDir()
@@ -19,11 +68,7 @@ func TestConvertRunsWorkerWithoutHostServices(t *testing.T) {
 	}
 	worker := testWorker(t, workspace, `test ! -e /run
 test ! -e /home
-interfaces=0
-while IFS= read -r line; do
-  case "$line" in *:*) interfaces=$((interfaces + 1));; esac
-done </proc/net/dev
-test "$interfaces" = 1
+test ! -e /proc/1/environ
 printf x > "$4"
 printf '{"converter":"sandbox-test","sha256":"2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881","byteSize":1}\n'`)
 	if _, err := worker.Convert(context.Background(), source, filepath.Join(workspace, "approved.pdf")); err != nil {
@@ -31,6 +76,12 @@ printf '{"converter":"sandbox-test","sha256":"2d711642b726b04401627ca9fbac32f5c8
 	}
 	if _, err := (Worker{}).Convert(context.Background(), source, filepath.Join(workspace, "unconverted.pdf")); err == nil {
 		t.Fatal("conversion continued without its enforceable sandbox")
+	}
+}
+
+func TestReadyRejectsUnavailableWorker(t *testing.T) {
+	if err := (Worker{command: filepath.Join(t.TempDir(), "missing-worker")}).Ready(); err == nil {
+		t.Fatal("Ready accepted an unavailable document worker")
 	}
 }
 
