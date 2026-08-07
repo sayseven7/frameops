@@ -8,7 +8,7 @@ if [[ ! -f $script ]]; then
 fi
 
 # shellcheck disable=SC2016 # Intentional literals checked with grep below.
-for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state" | sha256sum | cut -d '\'' '\'' -f1)"' 'for command in docker go pnpm curl od ss base64 sha256sum; do' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'postgres_port=${FRAMEOPS_POSTGRES_PORT:-15432}' 'minio_port=${FRAMEOPS_MINIO_PORT:-19000}' 'api_port=${FRAMEOPS_API_PORT:-8081}' 'ui_port=${FRAMEOPS_UI_PORT:-3000}' 'FRAMEOPS_POSTGRES_PORT=$postgres_port' 'FRAMEOPS_MINIO_PORT=$minio_port' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:$postgres_password@postgres:5432/frameops_local?sslmode=disable' 'FRAMEOPS_DATABASE_URL="postgres://frameops_local:$postgres_password@127.0.0.1:$postgres_port/frameops_local?sslmode=disable"' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:$api_port' 'FRAMEOPS_API_PORT=$api_port' 'FRAMEOPS_UI_PORT=$ui_port' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"' 'psql -U frameops_local -d frameops_local -c '\''SELECT 1'\''' 'up --build --wait' 'curl --fail --silent --output /dev/null "http://127.0.0.1:$ui_port/"' 'down --timeout 10'; do
+for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state" | sha256sum | cut -d '\'' '\'' -f1)"' 'for command in docker go pnpm curl od ss base64 sha256sum; do' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'postgres_port=${FRAMEOPS_POSTGRES_PORT:-15432}' 'minio_port=${FRAMEOPS_MINIO_PORT:-19000}' 'api_port=${FRAMEOPS_API_PORT:-8081}' 'ui_port=${FRAMEOPS_UI_PORT:-3000}' 'FRAMEOPS_POSTGRES_PORT=$postgres_port' 'FRAMEOPS_MINIO_PORT=$minio_port' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:$postgres_password@postgres:5432/frameops_local?sslmode=disable' 'FRAMEOPS_DATABASE_URL="postgres://frameops_local:$postgres_password@127.0.0.1:$postgres_port/frameops_local?sslmode=disable"' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:$api_port' 'FRAMEOPS_API_PORT=$api_port' 'FRAMEOPS_UI_PORT=$ui_port' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"' 'up --build --wait' 'curl --fail --silent --output /dev/null "http://127.0.0.1:$ui_port/"' 'down --timeout 10'; do
   if ! grep -Fq "$required" "$script"; then
     printf '%s must contain %q\n' "$script" "$required" >&2
     exit 1
@@ -258,3 +258,41 @@ for forbidden in 'docker system prune' 'docker volume prune' 'docker volume rm' 
     exit 1
   fi
 done
+
+single_up_state="$work/single-up-state"
+mkdir -p "$single_up_state"
+cat >"$work/bin/ss" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+cat >"$work/bin/docker" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >>"$work/docker-up-args"
+if [[ " \$* " == *' up '* ]]; then
+  printf '%s\n' "\$FRAMEOPS_MINIO_ROOT_USER_FIFO" >>"$work/fifo-opens"
+  cat "\$FRAMEOPS_MINIO_ROOT_USER_FIFO" >/dev/null
+  printf '%s\n' "\$FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO" >>"$work/fifo-opens"
+  cat "\$FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO" >/dev/null
+fi
+EOF
+cat >"$work/bin/go" <<'EOF'
+#!/bin/bash
+if [[ $1 == build ]]; then
+  printf '#!/bin/bash\nexit 0\n' >"$3"
+  chmod 700 "$3"
+fi
+EOF
+cat >"$work/bin/curl" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod 700 "$work/bin/ss" "$work/bin/docker" "$work/bin/go" "$work/bin/curl"
+
+if ! PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$single_up_state" timeout 10 /bin/bash "$script" >/dev/null 2>"$work/single-up-stderr"; then
+  printf '%s must complete after one Compose up that consumes both MinIO FIFOs\n' "$script" >&2
+  exit 1
+fi
+if [[ $(grep -c ' up ' "$work/docker-up-args") != 1 || $(wc -l <"$work/fifo-opens") != 2 || $(<"$work/docker-up-args") != *'up --build --wait'* || $(<"$work/docker-up-args") == *' exec '* ]]; then
+  printf '%s must use one Compose up --build --wait without reopening MinIO FIFOs or polling readiness\n' "$script" >&2
+  exit 1
+fi

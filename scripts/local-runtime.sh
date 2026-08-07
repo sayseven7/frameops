@@ -136,22 +136,7 @@ mkfifo "$minio_user_fifo" "$minio_password_fifo"
 ) &
 FRAMEOPS_MINIO_ROOT_USER_FIFO=$minio_user_fifo \
 FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO=$minio_password_fifo \
-docker compose --project-name "$project" --env-file "$environment" up -d postgres minio
-
-for attempt in {1..30}; do
-  if docker compose --project-name "$project" --env-file "$environment" exec -T postgres psql -U frameops_local -d frameops_local -c 'SELECT 1' >/dev/null && curl --fail --silent --output /dev/null "http://127.0.0.1:$minio_port/minio/health/live"; then
-    break
-  fi
-  if [[ $attempt == 30 ]]; then
-    printf 'PostgreSQL or MinIO did not become ready\n' >&2
-    exit 1
-  fi
-  sleep 1
-done
-
-FRAMEOPS_MINIO_ROOT_USER_FIFO=$minio_user_fifo \
-FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO=$minio_password_fifo \
-  docker compose --project-name "$project" --env-file "$environment" up --build --wait
+docker compose --project-name "$project" --env-file "$environment" up --build --wait
 set -a
 # shellcheck source=/dev/null
 source "$environment"
