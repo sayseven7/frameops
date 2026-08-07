@@ -57,19 +57,17 @@ operacional sem efeito colateral.
 ### Parada, backup, restore e upgrade
 
 `docker compose --env-file .env down --timeout 10` preserva os volumes nomeados;
-`down -v`, `--remove-orphans` e exclusão de volumes não fazem parte do contrato
-manual persistente. O launcher `scripts/local-runtime.sh` tem contrato distinto e
-efêmero: seu comando `down` passa o project-name exato derivado do diretório de
-estado e `--volumes`, removendo os volumes nomeados somente desse projeto isolado.
-Ele não é uma parada preservadora nem seleciona volumes externos ao projeto.
+`down -v`, `--remove-orphans` e exclusão de volumes não fazem parte do contrato.
+O launcher `scripts/local-runtime.sh` passa o project-name exato derivado do
+diretório de estado e também preserva seus volumes nomeados. Ele não seleciona
+volumes externos ao projeto.
 
 Não existe comando, formato ou teste de backup/restore que cubra juntos
 PostgreSQL e MinIO. Consequentemente, restore após perda de dados e rollback
 após migração bem-sucedida são **não suportados** pelo repositório. Antes de um
 upgrade, o operador deve ter backups externos consistentes e validados dos dois
-stores. Se a falha ocorrer antes da migração concluir no fluxo manual, pare sem
-remover volumes, corrija a configuração e repita a subida. Não use o `down` do
-launcher efêmero para essa recuperação. `frameops-migrate down-to VERSION`
+stores. Se a falha ocorrer antes da migração concluir, pare sem remover volumes,
+corrija a configuração e repita a subida. `frameops-migrate down-to VERSION`
 existe, mas não é um rollback operacional aprovado: migrations podem recusar ou
 destruir estado, e ele não restaura bytes do MinIO.
 
