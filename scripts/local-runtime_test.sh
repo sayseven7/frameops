@@ -15,6 +15,13 @@ for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state
   fi
 done
 
+checker_line=$(grep -nF 'if ! bash scripts/check-toolchains.sh; then' "$script" | cut -d: -f1)
+require_line=$(grep -nF 'for command in docker go pnpm curl od ss base64 sha256sum; do' "$script" | cut -d: -f1)
+if [[ -z $checker_line || -z $require_line || $checker_line -ge $require_line ]]; then
+  printf '%s must run the shared prerequisite check before local command checks\n' "$script" >&2
+  exit 1
+fi
+
 if grep -Fq '***' "$script"; then
   printf '%s must not use a masked database password\n' "$script" >&2
   exit 1
@@ -66,6 +73,14 @@ if [[ ! -f $work/preflight-check-args ]] || [[ $(<"$work/preflight-check-args") 
   exit 1
 fi
 rm "$work/bin/bash"
+cat >"$work/bin/bash" <<'EOF'
+#!/bin/bash
+if [[ $1 == scripts/check-toolchains.sh ]]; then
+  exit 0
+fi
+exec /bin/bash "$@"
+EOF
+chmod 700 "$work/bin/bash"
 
 long_state="$work/state"
 for _ in {1..20}; do
