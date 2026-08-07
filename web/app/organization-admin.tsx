@@ -24,6 +24,10 @@ export default function OrganizationAdmin({ csrf }: { csrf: string }) {
   const [busy, setBusy] = useState(false);
   const text = organizationCopy[locale];
 
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   async function load() {
     const [current, memberList, audit] = await Promise.all([readOrganization(), listOrganizationMembers(), listOrganizationAuditEvents({ limit: 25 })]);
     setOrganization(current); setMembers(collectionItems(memberList)); setEvents(collectionItems(audit)); setNextCursor(audit.nextCursor);

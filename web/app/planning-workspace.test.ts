@@ -17,6 +17,13 @@ test("changing locale does not reload and replace the planning form", () => {
   assert.doesNotMatch(workspace, /\}, \[engagementID, locale, pathname, router\]\);/);
 });
 
+test("keeps the document language synchronized with the selected locale in every client locale consumer", () => {
+  for (const source of ["./login/login-form.tsx", "./page.tsx", "./organization-admin.tsx", "./planning-workspace.tsx"]) {
+    const component = readFileSync(new URL(source, import.meta.url), "utf8");
+    assert.match(component, /document\.documentElement\.lang = locale/);
+  }
+});
+
 test("maps API states to localized labels without exposing raw enums", () => {
   const states = ["new", "pending", "needs_review", "confirmed", "false_positive", "open", "risk_accepted", "draft", "stored", "published", "approved", "fixed", "not_reproduced", "active", "closed"];
   for (const state of states) assert.notEqual(stateLabel(state, "pt-BR"), copy["pt-BR"].unknownState);
