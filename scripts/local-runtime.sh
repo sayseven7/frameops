@@ -37,7 +37,7 @@ if [[ ${1:-up} == down ]]; then
   mkfifo "$fifo_dir/minio-root-user" "$fifo_dir/minio-root-password"
   FRAMEOPS_MINIO_ROOT_USER_FIFO="$fifo_dir/minio-root-user" \
     FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO="$fifo_dir/minio-root-password" \
-    docker compose --project-name "$project" --env-file "$environment" down --timeout 10
+    docker compose --project-name "$project" --env-file "$environment" down --timeout 10 --volumes
   rm -f "$state/api.pid" "$state/web.pid"
   exit
 fi

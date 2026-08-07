@@ -189,3 +189,25 @@ if [[ $(<"$work/status-stderr") != '' ]] || [[ $(<"$work/docker-status-args") !=
   printf '%s status must run scoped docker compose ps without starting services\n' "$script" >&2
   exit 1
 fi
+
+down_state="$work/down-state"
+mkdir -p "$down_state"
+printf 'FRAMEOPS_LOCAL_DOWN=1\n' >"$down_state/runtime.env"
+down_project="frameops-local-$(printf '%s' "$down_state" | sha256sum | cut -d ' ' -f1)"
+cat >"$work/bin/docker" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >"$work/docker-down-args"
+EOF
+chmod 700 "$work/bin/docker"
+
+PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$down_state" bash "$script" down
+if [[ $(<"$work/docker-down-args") != "compose --project-name $down_project --env-file $down_state/runtime.env down --timeout 10 --volumes" ]]; then
+  printf '%s down must remove only the current project named volumes\n' "$script" >&2
+  exit 1
+fi
+for forbidden in 'docker system prune' 'docker volume prune' 'docker volume rm' '--remove-orphans'; do
+  if grep -Fq -- "$forbidden" "$script"; then
+    printf '%s down must not use %q\n' "$script" "$forbidden" >&2
+    exit 1
+  fi
+done
