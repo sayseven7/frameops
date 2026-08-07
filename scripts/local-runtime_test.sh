@@ -248,8 +248,8 @@ EOF
 chmod 700 "$work/bin/docker"
 
 PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$down_state" bash "$script" down
-if [[ $(<"$work/docker-down-args") != "compose --project-name $down_project --env-file $down_state/runtime.env down --timeout 10 --volumes" ]]; then
-  printf '%s down must remove only the current project named volumes\n' "$script" >&2
+if [[ $(<"$work/docker-down-args") != "compose --project-name $down_project --env-file $down_state/runtime.env down --timeout 10" ]]; then
+  printf '%s down must preserve the current project named volumes\n' "$script" >&2
   exit 1
 fi
 for forbidden in 'docker system prune' 'docker volume prune' 'docker volume rm' '--remove-orphans'; do

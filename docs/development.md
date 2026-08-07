@@ -21,16 +21,15 @@ single transactional bootstrap, and starts API `127.0.0.1:8081` and UI
 `localhost:3000`. It never prints generated secrets. The script refuses an
 occupied port, so it does not interfere with another local preview.
 
-Stop the same isolated project and delete only its project-scoped named volumes:
+Stop the same isolated project while preserving its project-scoped named volumes:
 
 ```bash
 bash scripts/local-runtime.sh down
 ```
 
-This launcher is disposable: `down` passes the exact generated Compose project
-name and `--volumes`, so its PostgreSQL and MinIO data is removed. Volumes outside
-that isolated project are not selected. Use manual Compose instead when local data
-must persist across shutdowns.
+`down` passes the exact generated Compose project name and preserves its
+PostgreSQL and MinIO volumes. Volumes outside that isolated project are not
+selected.
 
 For a manually managed Compose deployment, copy `.env.example` to a local `.env`,
 provide local MinIO root-credential FIFOs, then run `docker compose up --build
@@ -72,10 +71,9 @@ bash scripts/check-toolchains.sh
 `frameops-postgres-data` e `frameops-minio-data`. O diretório compartilhado do
 socket do renderer é `frameops-render-socket` e não é um backup. No fluxo Compose
 manual, não use `docker compose down -v`, `--remove-orphans` ou remoção manual de
-volumes para parar o runtime persistente. O launcher efêmero é a exceção explícita:
-`bash scripts/local-runtime.sh down` seleciona seu project-name derivado do
-diretório de estado e usa `--volumes`, removendo somente os volumes nomeados desse
-projeto isolado.
+volumes para parar o runtime persistente. `bash scripts/local-runtime.sh down`
+seleciona seu project-name derivado do diretório de estado e preserva os volumes
+nomeados desse projeto isolado.
 
 O MinIO lê suas credenciais raiz uma única vez por FIFOs e, por isso, tem
 `restart: "no"`. Para uma subida manual, exponha os valores já escolhidos para
@@ -111,9 +109,8 @@ curl --fail "http://127.0.0.1:$FRAMEOPS_API_PORT/health"
 ```
 
 Pare graciosamente sem apagar estado com `docker compose --env-file .env down
---timeout 10`. Para o launcher isolado e descartável, `bash
-scripts/local-runtime.sh down` também apaga os volumes nomeados do projeto; não o
-use como parada preservadora. Uma falha antes de a migração completar no fluxo
+--timeout 10`. `bash scripts/local-runtime.sh down` também é uma parada
+preservadora. Uma falha antes de a migração completar no fluxo
 manual pode ser recuperada parando sem volumes, corrigindo a configuração e
 repetindo a subida. Depois de uma migração
 concluída, não execute `down-to` como rollback rotineiro: o binário o expõe para
