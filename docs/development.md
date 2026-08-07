@@ -50,6 +50,68 @@ make check
 
 Individual commands are available through `make fmt`, `make lint`, `make test`, and `make web-check`.
 
+## Contrato operacional do Compose
+
+O `compose.yaml` é um runtime local, isolado por portas loopback; ele não é um
+runbook de produção nem fornece backup, restore ou rollback automatizados. A
+decisão e os limites verificáveis estão em
+`docs/decisions/0004-contrato-operacional-compose.md`.
+
+Antes de iniciar, valide as versões e a configuração renderizada:
+
+```bash
+bash scripts/check-toolchains.sh
+```
+
+`postgres` e `minio` mantêm os dados somente nos volumes nomeados
+`frameops-postgres-data` e `frameops-minio-data`. O diretório compartilhado do
+socket do renderer é `frameops-render-socket` e não é um backup. Não use
+`docker compose down -v`, `--remove-orphans` ou remoção manual de volumes para
+parar este runtime.
+
+O MinIO lê suas credenciais raiz uma única vez por FIFOs e, por isso, tem
+`restart: "no"`. Para uma subida manual, exponha os valores já escolhidos para
+o ambiente local, crie FIFOs temporários e publique cada valor uma vez:
+
+```bash
+set -a; source .env; set +a
+fifo_dir=$(mktemp -d)
+trap 'rm -rf "$fifo_dir"' EXIT
+mkfifo "$fifo_dir/minio-root-user" "$fifo_dir/minio-root-password"
+(printf '%s' "$FRAMEOPS_MINIO_ROOT_USER" >"$fifo_dir/minio-root-user") &
+(printf '%s' "$FRAMEOPS_MINIO_ROOT_PASSWORD" >"$fifo_dir/minio-root-password") &
+FRAMEOPS_MINIO_ROOT_USER_FIFO="$fifo_dir/minio-root-user" \
+FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO="$fifo_dir/minio-root-password" \
+  docker compose --env-file .env config --quiet
+FRAMEOPS_MINIO_ROOT_USER_FIFO="$fifo_dir/minio-root-user" \
+FRAMEOPS_MINIO_ROOT_PASSWORD_FIFO="$fifo_dir/minio-root-password" \
+  docker compose --env-file .env up --build --wait
+```
+
+Não coloque esses valores em histórico de shell, logs ou documentação. Para o
+launcher local, que gera e guarda seu próprio estado com permissões restritas,
+prefira `bash scripts/local-runtime.sh`.
+
+O `up --wait` só retorna depois dos healthchecks declarados: PostgreSQL usa
+`pg_isready`, MinIO usa `/minio/health/live`, renderer testa o socket Unix, API
+usa `GET /health` e web usa `GET /login`. Confira o estado sem modificar o
+projeto:
+
+```bash
+docker compose --env-file .env ps
+curl --fail "http://127.0.0.1:$FRAMEOPS_API_PORT/health"
+```
+
+Pare graciosamente sem apagar estado com `docker compose --env-file .env down
+--timeout 10`; para o launcher isolado, use `bash scripts/local-runtime.sh
+down`. Uma falha antes de a migração completar pode ser recuperada parando assim
+e corrigindo a configuração antes de repetir a subida. Depois de uma migração
+concluída, não execute `down-to` como rollback rotineiro: o binário o expõe para
+intervenção explícita, mas não há procedimento de compatibilidade nem restore
+consistente de PostgreSQL e MinIO neste repositório. Preserve e valide backups
+externos dos dois stores antes de qualquer upgrade; sem eles, a recuperação de
+perda de dados não é suportada.
+
 ## Web portfolio
 
 The web app calls its same-origin `/v1` routes and keeps the session cookie in the browser. Configure the Next.js reverse proxy with the non-secret API origin before starting or building the web app:
