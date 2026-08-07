@@ -30,6 +30,10 @@ export default function PlanningWorkspace({ engagementID }: PlanningWorkspacePro
   useEffect(() => { localeRef.current = locale; }, [locale]);
 
   useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
+  useEffect(() => {
     let active = true;
     void requestJSON<{ token: string }>("/v1/csrf").then(async ({ token }) => {
       if (!active) return;

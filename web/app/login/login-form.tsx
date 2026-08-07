@@ -19,6 +19,10 @@ export default function LoginForm() {
   const destination = loginDestination(searchParams.get("next"));
 
   useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
+  useEffect(() => {
     void requestJSON<{ token: string }>("/v1/csrf").then(() => router.replace(destination)).catch(() => undefined);
   }, [destination, router]);
 
