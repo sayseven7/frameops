@@ -199,6 +199,17 @@ func TestReleaseJourney(t *testing.T) {
 	if evidence.StatusCode != http.StatusCreated || !strings.Contains(evidence.body, `"state":"stored"`) {
 		t.Fatalf("capture evidence = %d %s", evidence.StatusCode, evidence.body)
 	}
+	backup := filepath.Join(t.TempDir(), "recovery")
+	root := filepath.Clean(filepath.Join("..", ".."))
+	releaseRecovery(t, root, runtime.state, "backup", backup)
+	releaseRecovery(t, root, runtime.state, "restore", backup)
+	admin = loginReleaseOperator(t, runtime, "admin@frameops.local", filepath.Join(runtime.state, "bootstrap-password"))
+	csrf = releaseCSRF(t, runtime.api, admin.session)
+	member = loginReleaseOperator(t, runtime, "release-member@example.test", memberPassword)
+	memberCSRF = releaseCSRF(t, runtime.api, member.session)
+	if refused := releaseRequest(t, runtime.api, http.MethodPost, "/v1/clients", `{"name":"Forbidden Client After Restore"}`, member.session, memberCSRF); refused.StatusCode != http.StatusForbidden {
+		t.Fatalf("restored member creates client = %d %s, want 403", refused.StatusCode, refused.body)
+	}
 	if triaged := releaseRequest(t, runtime.api, http.MethodPut, "/v1/findings/"+url.PathEscape(findingID)+"/triage", `{"validationState":"confirmed","remediationState":"open"}`, admin.session, csrf); triaged.StatusCode != http.StatusOK {
 		t.Fatalf("triage finding = %d %s", triaged.StatusCode, triaged.body)
 	}
@@ -301,6 +312,17 @@ func releaseRuntimeDown(root string, environment []string) ([]byte, error) {
 	down := exec.Command("bash", "scripts/local-runtime.sh", "down")
 	down.Dir, down.Env = root, environment
 	return down.CombinedOutput()
+}
+
+func releaseRecovery(t *testing.T, root, state, operation, backup string) {
+	t.Helper()
+	command := exec.Command("bash", "scripts/recovery.sh", operation, backup)
+	command.Dir = root
+	command.Env = append(os.Environ(), "FRAMEOPS_LOCAL_STATE_DIR="+state)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("recovery %s: %v\n%s", operation, err, output)
+	}
 }
 
 func releasePort(t *testing.T) int {

@@ -119,6 +119,26 @@ consistente de PostgreSQL e MinIO neste repositório. Preserve e valide backups
 externos dos dois stores antes de qualquer upgrade; sem eles, a recuperação de
 perda de dados não é suportada.
 
+### Recuperação isolada do runtime local
+
+Com o runtime local já iniciado, `scripts/recovery.sh` cria um backup consistente
+do dump PostgreSQL em formato customizado e dos bytes MinIO após parar somente os
+containers do project-name derivado de `FRAMEOPS_LOCAL_STATE_DIR`. Ele não usa
+`down`, volumes externos, `down -v` ou `--remove-orphans`, e não lê nem imprime
+segredos:
+
+```bash
+bash scripts/recovery.sh backup /caminho/privado/frameops-backup
+bash scripts/recovery.sh restore /caminho/privado/frameops-backup
+```
+
+O restore verifica `SHA256SUMS`, restaura PostgreSQL com `pg_restore --clean` e
+reinstala o arquivo MinIO no volume do mesmo container. Ele não é rollback:
+qualquer falha deixa PostgreSQL e MinIO parados e é um bloqueador de release;
+preserve o backup prévio, investigue e faça recuperação manual validada antes de
+reiniciar o runtime. O contrato é exclusivo do runtime local isolado e não
+substitui backup externo nem aprova uso em produção.
+
 ## Web portfolio
 
 The web app calls its same-origin `/v1` routes and keeps the session cookie in the browser. Configure the Next.js reverse proxy with the non-secret API origin before starting or building the web app:
