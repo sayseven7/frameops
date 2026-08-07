@@ -143,6 +143,23 @@ export function collectionItems<T>(collection: { items: T[] | null }): T[] {
   return collection.items ?? [];
 }
 
+export async function readWorkspaceContext(projectID = "", fetcher: Fetcher = fetch) {
+  const [clientCollection, methodologyCollection] = await Promise.all([
+    requestJSON<{ items: Client[] | null }>("/v1/clients", {}, undefined, fetcher),
+    requestJSON<{ items: Methodology[] | null }>("/v1/methodology-templates", {}, undefined, fetcher),
+  ]);
+  const clients = collectionItems(clientCollection);
+  const methodologies = collectionItems(methodologyCollection);
+  if (!projectID) return { clients, methodologies, clientID: "", engagements: [] as Engagement[] };
+
+  const projectsByClient = await Promise.all(clients.map(async ({ id: clientID }) => ({
+    clientID,
+    engagements: collectionItems(await requestJSON<{ items: Engagement[] | null }>(`/v1/clients/${encodeURIComponent(clientID)}/engagements`, {}, undefined, fetcher)),
+  })));
+  const selected = projectsByClient.find(({ engagements }) => engagements.some(({ id }) => id === projectID));
+  return { clients, methodologies, clientID: selected?.clientID ?? "", engagements: selected?.engagements ?? [] };
+}
+
 export async function requestJSON<T>(
   path: string,
   init: RequestInit = {},

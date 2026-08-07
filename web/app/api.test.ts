@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, createOrganizationMember, createProjectPlan, deriveReportPDF, generateReportRevision, listOrganizationAuditEvents, listOrganizationMembers, publishMethodology, readEngagementChecklist, readIngestions, readOrganization, readProjectPlan, readReportRevisions, recordRetest, requestJSON, transitionProjectPlan, triageFinding, updateOrganization, updateOrganizationMember, updateProjectPlan, uploadReportRevision } from "./api.ts";
+import { approveReportRevision, captureEvidence, collectionItems, createEngagement, createFinding, createMethodology, createOrganizationMember, createProjectPlan, deriveReportPDF, generateReportRevision, listOrganizationAuditEvents, listOrganizationMembers, publishMethodology, readEngagementChecklist, readIngestions, readOrganization, readProjectPlan, readReportRevisions, readWorkspaceContext, recordRetest, requestJSON, transitionProjectPlan, triageFinding, updateOrganization, updateOrganizationMember, updateProjectPlan, uploadReportRevision } from "./api.ts";
 import { apiErrorMessage } from "./copy.ts";
 
 test("requestJSON keeps the session and sends CSRF for a mutating request", async () => {
@@ -85,6 +85,26 @@ test("methodology and engagement requests use their API routes and CSRF", async 
     ["https://frameops.example.test/v1/clients/client-id/engagements", "POST", "csrf-token", "include"],
     ["https://frameops.example.test/v1/engagements/engagement-id/checklist", "GET", null, "include"],
   ]);
+});
+
+test("authenticated workspace restores clients, methodologies, and the routed project context", async () => {
+  const requests: string[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const path = new URL(input.toString(), "https://frameops.example.test").pathname;
+    requests.push(path);
+    if (path === "/v1/clients") return Response.json({ items: [{ id: "client-id", name: "Client" }] });
+    if (path === "/v1/methodology-templates") return Response.json({ items: [{ id: "methodology-id", name: "Web" }] });
+    if (path === "/v1/clients/client-id/engagements") return Response.json({ items: [{ id: "project-id", clientId: "client-id", name: "Project" }] });
+    return Response.json({ error: "not_found" }, { status: 404 });
+  };
+
+  const context = await readWorkspaceContext("project-id", fetcher);
+
+  assert.deepEqual(requests, ["/v1/clients", "/v1/methodology-templates", "/v1/clients/client-id/engagements"]);
+  assert.equal(context.clientID, "client-id");
+  assert.equal(context.engagements[0]?.id, "project-id");
+  assert.equal(context.clients.length, 1);
+  assert.equal(context.methodologies.length, 1);
 });
 
 test("apiErrorMessage localizes invalid finding state and CVSS errors", () => {
