@@ -13,11 +13,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
 const releaseE2EEnvironment = "FRAMEOPS_RELEASE_E2E"
+
+var releaseComposeV2Version = regexp.MustCompile(`^Docker Compose version v?([0-9]+\.[0-9]+\.[0-9]+)(\+[0-9A-Za-z.~+-]+)?$`)
 
 func TestReleaseComposeV2RejectsUnavailablePlugin(t *testing.T) {
 	bin := t.TempDir()
@@ -44,6 +47,40 @@ func TestReleaseComposeV2RejectsUnsupportedVersion(t *testing.T) {
 	err := requireReleaseComposeV2()
 	if err == nil || !strings.Contains(err.Error(), "2.20.0") {
 		t.Fatalf("require supported Compose V2 = %v, want minimum-version diagnostic", err)
+	}
+}
+
+func TestReleaseComposeV2RejectsUnstableOrMalformedVersion(t *testing.T) {
+	for _, output := range []string{
+		"Docker Compose version v2.20.0-rc.1",
+		"Docker Compose version v2.20.0 unexpected",
+		"Docker Compose version v2.20",
+	} {
+		t.Run(output, func(t *testing.T) {
+			bin := t.TempDir()
+			docker := filepath.Join(bin, "docker")
+			if err := os.WriteFile(docker, []byte("#!/bin/sh\nprintf '"+output+"\\n'\n"), 0o700); err != nil {
+				t.Fatalf("write fake docker: %v", err)
+			}
+			t.Setenv("PATH", bin)
+
+			if err := requireReleaseComposeV2(); err == nil || !strings.Contains(err.Error(), "2.20.0") {
+				t.Fatalf("require stable supported Compose V2 = %v, want rejection", err)
+			}
+		})
+	}
+}
+
+func TestReleaseComposeV2AcceptsStableBuildMetadata(t *testing.T) {
+	bin := t.TempDir()
+	docker := filepath.Join(bin, "docker")
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\nprintf 'Docker Compose version 2.40.3+ds1-0ubuntu1~24.04.1\\n'\n"), 0o700); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", bin)
+
+	if err := requireReleaseComposeV2(); err != nil {
+		t.Fatalf("require stable Compose V2 with build metadata: %v", err)
 	}
 }
 
@@ -248,10 +285,14 @@ func requireReleaseComposeV2() error {
 	if err != nil {
 		return fmt.Errorf("Docker Compose V2 is required for the real Compose release journey: %w\n%s", err, output)
 	}
-	version := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(string(output)), "Docker Compose version "), "v")
+	versionOutput := strings.TrimSpace(string(output))
+	matches := releaseComposeV2Version.FindStringSubmatch(versionOutput)
+	if matches == nil {
+		return fmt.Errorf("Docker Compose V2 >= 2.20.0 is required for the real Compose release journey; detected %q", versionOutput)
+	}
 	var major, minor, patch int
-	if _, err := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch); err != nil || major < 2 || major == 2 && minor < 20 {
-		return fmt.Errorf("Docker Compose V2 >= 2.20.0 is required for the real Compose release journey; detected %q", strings.TrimSpace(string(output)))
+	if _, err := fmt.Sscanf(matches[1], "%d.%d.%d", &major, &minor, &patch); err != nil || major < 2 || major == 2 && minor < 20 {
+		return fmt.Errorf("Docker Compose V2 >= 2.20.0 is required for the real Compose release journey; detected %q", versionOutput)
 	}
 	return nil
 }
