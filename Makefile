@@ -17,7 +17,7 @@ test: ## run all Go tests
 	bash scripts/deploy-contract_test.sh
 
 web-check: ## verify the frozen frontend workspace
-	pnpm install --frozen-lockfile --ignore-scripts
+	CI=true pnpm install --frozen-lockfile --ignore-scripts
 	pnpm --filter @frameops/web test
 	pnpm --filter @frameops/web lint
 	pnpm --filter @frameops/web typecheck
