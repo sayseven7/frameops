@@ -21,6 +21,11 @@ require() {
   }
 }
 
+if ! bash scripts/check-toolchains.sh; then
+  printf 'local runtime prerequisites are unavailable; run bash scripts/check-toolchains.sh\n' >&2
+  exit 1
+fi
+
 for command in docker go pnpm curl od ss base64 sha256sum; do
   require "$command"
 done

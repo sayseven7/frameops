@@ -8,15 +8,19 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
 const releaseE2EEnvironment = "FRAMEOPS_RELEASE_E2E"
+
+var releaseComposeV2Version = regexp.MustCompile(`^Docker Compose version v?([0-9]+\.[0-9]+\.[0-9]+)(\+[0-9A-Za-z.~+-]+)?$`)
 
 func TestReleaseComposeV2RejectsUnavailablePlugin(t *testing.T) {
 	bin := t.TempDir()
@@ -29,6 +33,54 @@ func TestReleaseComposeV2RejectsUnavailablePlugin(t *testing.T) {
 	err := requireReleaseComposeV2()
 	if err == nil || !strings.Contains(err.Error(), "Docker Compose V2") {
 		t.Fatalf("require Compose V2 = %v, want diagnostic", err)
+	}
+}
+
+func TestReleaseComposeV2RejectsUnsupportedVersion(t *testing.T) {
+	bin := t.TempDir()
+	docker := filepath.Join(bin, "docker")
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\nprintf 'Docker Compose version v2.19.0\\n'\n"), 0o700); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", bin)
+
+	err := requireReleaseComposeV2()
+	if err == nil || !strings.Contains(err.Error(), "2.20.0") {
+		t.Fatalf("require supported Compose V2 = %v, want minimum-version diagnostic", err)
+	}
+}
+
+func TestReleaseComposeV2RejectsUnstableOrMalformedVersion(t *testing.T) {
+	for _, output := range []string{
+		"Docker Compose version v2.20.0-rc.1",
+		"Docker Compose version v2.20.0 unexpected",
+		"Docker Compose version v2.20",
+	} {
+		t.Run(output, func(t *testing.T) {
+			bin := t.TempDir()
+			docker := filepath.Join(bin, "docker")
+			if err := os.WriteFile(docker, []byte("#!/bin/sh\nprintf '"+output+"\\n'\n"), 0o700); err != nil {
+				t.Fatalf("write fake docker: %v", err)
+			}
+			t.Setenv("PATH", bin)
+
+			if err := requireReleaseComposeV2(); err == nil || !strings.Contains(err.Error(), "2.20.0") {
+				t.Fatalf("require stable supported Compose V2 = %v, want rejection", err)
+			}
+		})
+	}
+}
+
+func TestReleaseComposeV2AcceptsStableBuildMetadata(t *testing.T) {
+	bin := t.TempDir()
+	docker := filepath.Join(bin, "docker")
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\nprintf 'Docker Compose version 2.40.3+ds1-0ubuntu1~24.04.1\\n'\n"), 0o700); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", bin)
+
+	if err := requireReleaseComposeV2(); err != nil {
+		t.Fatalf("require stable Compose V2 with build metadata: %v", err)
 	}
 }
 
@@ -53,6 +105,25 @@ func TestReleaseRuntimeDownUsesIsolatedRuntimeState(t *testing.T) {
 	}
 }
 
+func TestReleaseUIRequestUsesSameOriginSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/organization" {
+			t.Fatalf("UI request path = %q, want /v1/organization", request.URL.Path)
+		}
+		cookie, err := request.Cookie("__Host-frameops_session")
+		if err != nil || cookie.Value != "session-token" {
+			t.Fatalf("UI request session = %q, %v; want session-token", cookie.Value, err)
+		}
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	response := releaseRequest(t, server.URL, http.MethodGet, "/v1/organization", "", "session-token", "")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("UI request status = %d, want 200", response.StatusCode)
+	}
+}
+
 // TestReleaseJourney uses the shipped local-runtime launcher, whose state path
 // names a fresh Compose project and therefore fresh PostgreSQL and MinIO volumes.
 // It deliberately drives only the released binaries and HTTP API.
@@ -68,6 +139,14 @@ func TestReleaseJourney(t *testing.T) {
 
 	admin := loginReleaseOperator(t, runtime, "admin@frameops.local", filepath.Join(runtime.state, "bootstrap-password"))
 	csrf := releaseCSRF(t, runtime.api, admin.session)
+	uiLogin := releaseRequest(t, runtime.ui, http.MethodGet, "/login", "", "", "")
+	if uiLogin.StatusCode < http.StatusOK || uiLogin.StatusCode >= http.StatusMultipleChoices {
+		t.Fatalf("UI login = %d %s", uiLogin.StatusCode, uiLogin.body)
+	}
+	uiOrganization := releaseRequest(t, runtime.ui, http.MethodGet, "/v1/organization", "", admin.session, "")
+	if uiOrganization.StatusCode != http.StatusOK || !strings.Contains(uiOrganization.body, "FrameOPS Local") {
+		t.Fatalf("UI organization proxy = %d %s", uiOrganization.StatusCode, uiOrganization.body)
+	}
 
 	organization := releaseRequest(t, runtime.api, http.MethodGet, "/v1/organization", "", admin.session, "")
 	if organization.StatusCode != http.StatusOK || !strings.Contains(organization.body, "FrameOPS Local") {
@@ -155,6 +234,7 @@ const releaseNmapXML = `<?xml version="1.0"?><nmaprun scanner="nmap" args="-sn 1
 type releaseRuntime struct {
 	state string
 	api   string
+	ui    string
 	fops  string
 }
 
@@ -197,13 +277,22 @@ func startReleaseRuntime(t *testing.T) releaseRuntime {
 	if err != nil {
 		t.Fatalf("start isolated local runtime: %v\n%s", err, output)
 	}
-	return releaseRuntime{state: state, api: fmt.Sprintf("http://127.0.0.1:%d", ports[2]), fops: filepath.Join(state, "bin", "fops")}
+	return releaseRuntime{state: state, api: fmt.Sprintf("http://127.0.0.1:%d", ports[2]), ui: fmt.Sprintf("http://127.0.0.1:%d", ports[3]), fops: filepath.Join(state, "bin", "fops")}
 }
 
 func requireReleaseComposeV2() error {
 	output, err := exec.Command("docker", "compose", "version").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("Docker Compose V2 is required for the real Compose release journey: %w\n%s", err, output)
+	}
+	versionOutput := strings.TrimSpace(string(output))
+	matches := releaseComposeV2Version.FindStringSubmatch(versionOutput)
+	if matches == nil {
+		return fmt.Errorf("Docker Compose V2 >= 2.20.0 is required for the real Compose release journey; detected %q", versionOutput)
+	}
+	var major, minor, patch int
+	if _, err := fmt.Sscanf(matches[1], "%d.%d.%d", &major, &minor, &patch); err != nil || major < 2 || major == 2 && minor < 20 {
+		return fmt.Errorf("Docker Compose V2 >= 2.20.0 is required for the real Compose release journey; detected %q", versionOutput)
 	}
 	return nil
 }

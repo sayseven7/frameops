@@ -15,6 +15,13 @@ for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state
   fi
 done
 
+checker_line=$(grep -nF 'if ! bash scripts/check-toolchains.sh; then' "$script" | cut -d: -f1)
+require_line=$(grep -nF 'for command in docker go pnpm curl od ss base64 sha256sum; do' "$script" | cut -d: -f1)
+if [[ -z $checker_line || -z $require_line || $checker_line -ge $require_line ]]; then
+  printf '%s must run the shared prerequisite check before local command checks\n' "$script" >&2
+  exit 1
+fi
+
 if grep -Fq '***' "$script"; then
   printf '%s must not use a masked database password\n' "$script" >&2
   exit 1
@@ -35,6 +42,46 @@ done
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir "$work/bin" "$work/state"
+
+# A missing release prerequisite must fail before generating output through
+# Compose; the launcher delegates the version contract to the shared checker.
+preflight_state="$work/preflight-state"
+mkdir -p "$preflight_state"
+cat >"$work/bin/ss" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+cat >"$work/bin/docker" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >"$work/preflight-docker-args"
+exit 23
+EOF
+cat >"$work/bin/bash" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >"$work/preflight-check-args"
+printf 'missing required release prerequisite\n' >&2
+exit 37
+EOF
+chmod 700 "$work/bin/ss" "$work/bin/docker" "$work/bin/bash"
+
+if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$preflight_state" /bin/bash "$script" >/dev/null 2>"$work/preflight-stderr"; then
+  printf '%s must reject an unavailable release prerequisite\n' "$script" >&2
+  exit 1
+fi
+if [[ ! -f $work/preflight-check-args ]] || [[ $(<"$work/preflight-check-args") != 'scripts/check-toolchains.sh' ]] || ! grep -Fq 'local runtime prerequisites are unavailable' "$work/preflight-stderr" || [[ -e $work/preflight-docker-args ]]; then
+  printf '%s must run the shared prerequisite check and fail before Docker Compose\n' "$script" >&2
+  exit 1
+fi
+rm "$work/bin/bash"
+cat >"$work/bin/bash" <<'EOF'
+#!/bin/bash
+if [[ $1 == scripts/check-toolchains.sh ]]; then
+  exit 0
+fi
+exec /bin/bash "$@"
+EOF
+chmod 700 "$work/bin/bash"
+
 long_state="$work/state"
 for _ in {1..20}; do
   long_state+='/frameops-local-state'
