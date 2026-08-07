@@ -8,7 +8,7 @@ if [[ ! -f $script ]]; then
 fi
 
 # shellcheck disable=SC2016 # Intentional literals checked with grep below.
-for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state" | sha256sum | cut -d '\'' '\'' -f1)"' 'for command in docker go pnpm curl od ss base64 sha256sum; do' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'postgres_port=${FRAMEOPS_POSTGRES_PORT:-15432}' 'minio_port=${FRAMEOPS_MINIO_PORT:-19000}' 'api_port=${FRAMEOPS_API_PORT:-8081}' 'ui_port=${FRAMEOPS_UI_PORT:-3000}' 'FRAMEOPS_POSTGRES_PORT=$postgres_port' 'FRAMEOPS_MINIO_PORT=$minio_port' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:$postgres_password@postgres:5432/frameops_local?sslmode=disable' 'FRAMEOPS_DATABASE_URL="postgres://frameops_local:$postgres_password@127.0.0.1:$postgres_port/frameops_local?sslmode=disable"' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:$api_port' 'FRAMEOPS_API_PORT=$api_port' 'FRAMEOPS_UI_PORT=$ui_port' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"' 'up --build --wait' 'curl --fail --silent --output /dev/null "http://127.0.0.1:$ui_port/"' 'down --timeout 10'; do
+for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state" | sha256sum | cut -d '\'' '\'' -f1)"' 'for command in docker go pnpm curl od ss base64 sha256sum timeout; do' 'chmod 700 "$state"' 'chmod 600 "$environment"' 'postgres_port=${FRAMEOPS_POSTGRES_PORT:-15432}' 'minio_port=${FRAMEOPS_MINIO_PORT:-19000}' 'api_port=${FRAMEOPS_API_PORT:-8081}' 'ui_port=${FRAMEOPS_UI_PORT:-3000}' 'FRAMEOPS_POSTGRES_PORT=$postgres_port' 'FRAMEOPS_MINIO_PORT=$minio_port' 'FRAMEOPS_DATABASE_URL=postgres://frameops_local:$postgres_password@postgres:5432/frameops_local?sslmode=disable' 'FRAMEOPS_DATABASE_URL="postgres://frameops_local:$postgres_password@127.0.0.1:$postgres_port/frameops_local?sslmode=disable"' 'FRAMEOPS_HTTP_ADDR=127.0.0.1:$api_port' 'FRAMEOPS_API_PORT=$api_port' 'FRAMEOPS_UI_PORT=$ui_port' 'FRAMEOPS_OBJECT_LOCK_PROOF=1' 'bootstrap-first-admin' 'docker compose --project-name "$project" --env-file "$environment"' 'up --build --wait' 'curl --fail --silent --output /dev/null "http://127.0.0.1:$ui_port/"' 'down --timeout 10'; do
   if ! grep -Fq "$required" "$script"; then
     printf '%s must contain %q\n' "$script" "$required" >&2
     exit 1
@@ -16,7 +16,7 @@ for required in 'umask 077' 'project="frameops-local-$(printf '\''%s'\'' "$state
 done
 
 checker_line=$(grep -nF 'if ! bash scripts/check-toolchains.sh; then' "$script" | cut -d: -f1)
-require_line=$(grep -nF 'for command in docker go pnpm curl od ss base64 sha256sum; do' "$script" | cut -d: -f1)
+require_line=$(grep -nF 'for command in docker go pnpm curl od ss base64 sha256sum timeout; do' "$script" | cut -d: -f1)
 if [[ -z $checker_line || -z $require_line || $checker_line -ge $require_line ]]; then
   printf '%s must run the shared prerequisite check before local command checks\n' "$script" >&2
   exit 1
@@ -296,3 +296,47 @@ if [[ $(grep -c ' up ' "$work/docker-up-args") != 1 || $(wc -l <"$work/fifo-open
   printf '%s must use one Compose up --build --wait without reopening MinIO FIFOs or polling readiness\n' "$script" >&2
   exit 1
 fi
+
+timeout_state="$work/timeout-state"
+mkdir -p "$timeout_state"
+timeout_project="frameops-local-$(printf '%s' "$timeout_state" | sha256sum | cut -d ' ' -f1)"
+cat >"$work/bin/ss" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+cat >"$work/bin/docker" <<'EOF'
+#!/bin/bash
+if [[ " $* " == *' up '* ]]; then
+  sleep 30
+fi
+EOF
+cat >"$work/bin/timeout" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >"$work/timeout-args"
+while [[ \$1 == --* ]]; do shift; done
+shift
+pgrep -P "\$PPID" | grep -vx "\$\$" >"$work/writer-pids"
+"\$@" &
+child=\$!
+sleep 1
+kill "\$child"
+wait "\$child" || true
+exit 124
+EOF
+chmod 700 "$work/bin/ss" "$work/bin/docker" "$work/bin/timeout"
+
+if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$timeout_state" bash "$script" >/dev/null 2>"$work/timeout-stderr"; then
+  printf '%s must fail when Compose does not read the MinIO FIFOs\n' "$script" >&2
+  exit 1
+fi
+if [[ $(<"$work/timeout-args") != "--foreground 300s docker compose --project-name $timeout_project --env-file $timeout_state/runtime.env up --build --wait" ]] || ! grep -Fq 'docker compose up --build --wait timed out' "$work/timeout-stderr" || [[ $(wc -l <"$work/writer-pids") != 2 ]] || ! grep -Fq 'cleanup_fifos; trap - EXIT' "$script"; then
+  printf '%s must bound Compose up and report a timeout after starting both FIFO writers\n' "$script" >&2
+  exit 1
+fi
+while read -r writer_pid; do
+  if kill -0 "$writer_pid" 2>/dev/null; then
+    kill "$writer_pid" 2>/dev/null || true
+    printf '%s must terminate FIFO writer PID %s on exit\n' "$script" "$writer_pid" >&2
+    exit 1
+  fi
+done <"$work/writer-pids"
