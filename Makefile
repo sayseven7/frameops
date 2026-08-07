@@ -13,6 +13,7 @@ test: ## run all Go tests
 	bash scripts/migrations-contract_test.sh
 	bash scripts/check-compose_test.sh
 	bash scripts/local-runtime_test.sh
+	bash scripts/recovery_test.sh
 	bash scripts/deploy-contract_test.sh
 
 web-check: ## verify the frozen frontend workspace
