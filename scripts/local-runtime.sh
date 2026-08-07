@@ -69,6 +69,11 @@ for binding in "$postgres_port:5432" "$minio_port:9000" "$api_port:8080" "$ui_po
   fi
 done
 
+if ! bash scripts/check-toolchains.sh; then
+  printf 'local runtime prerequisites are unavailable; run bash scripts/check-toolchains.sh\n' >&2
+  exit 1
+fi
+
 secret_file() {
   local path=$1
   local bytes=$2

@@ -35,6 +35,38 @@ done
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir "$work/bin" "$work/state"
+
+# A missing release prerequisite must fail before generating output through
+# Compose; the launcher delegates the version contract to the shared checker.
+preflight_state="$work/preflight-state"
+mkdir -p "$preflight_state"
+cat >"$work/bin/ss" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+cat >"$work/bin/docker" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >"$work/preflight-docker-args"
+exit 23
+EOF
+cat >"$work/bin/bash" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >"$work/preflight-check-args"
+printf 'missing required release prerequisite\n' >&2
+exit 37
+EOF
+chmod 700 "$work/bin/ss" "$work/bin/docker" "$work/bin/bash"
+
+if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$preflight_state" /bin/bash "$script" >/dev/null 2>"$work/preflight-stderr"; then
+  printf '%s must reject an unavailable release prerequisite\n' "$script" >&2
+  exit 1
+fi
+if [[ ! -f $work/preflight-check-args ]] || [[ $(<"$work/preflight-check-args") != 'scripts/check-toolchains.sh' ]] || ! grep -Fq 'local runtime prerequisites are unavailable' "$work/preflight-stderr" || [[ -e $work/preflight-docker-args ]]; then
+  printf '%s must run the shared prerequisite check and fail before Docker Compose\n' "$script" >&2
+  exit 1
+fi
+rm "$work/bin/bash"
+
 long_state="$work/state"
 for _ in {1..20}; do
   long_state+='/frameops-local-state'
