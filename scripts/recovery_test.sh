@@ -30,7 +30,21 @@ for required in \
   fi
 done
 
-for forbidden in 'down -v' '--remove-orphans' 'docker system prune' 'docker volume prune' 'docker volume rm' 'docker compose down'; do
+for required in \
+  '--pull=never' \
+  '--network=none' \
+  '--cap-drop=ALL' \
+  '--security-opt=no-new-privileges' \
+  'docker inspect --format' \
+  'docker volume inspect --format' \
+  '--mount "type=volume,src=$minio_data_volume,dst=/data"'; do
+  if ! grep -Fq -- "$required" "$script"; then
+    printf '%s must harden the MinIO cleanup helper with %q\n' "$script" "$required" >&2
+    exit 1
+  fi
+done
+
+for forbidden in 'down -v' '--remove-orphans' 'docker system prune' 'docker volume prune' 'docker volume rm' 'docker compose down' '--volumes-from'; do
   if grep -Fq -- "$forbidden" "$script"; then
     printf '%s must not contain %q\n' "$script" "$forbidden" >&2
     exit 1
@@ -88,6 +102,7 @@ done
 
 cat >"$work/bin/docker" <<EOF
 #!/bin/bash
+printf '%s\\n' "\$*" >>"$work/docker-args"
 case "\$*" in
   "compose --project-name $project --env-file $work/state/runtime.env ps -q postgres") printf 'postgres-id\\n' ;;
   "compose --project-name $project --env-file $work/state/runtime.env ps -q minio") printf 'minio-id\\n' ;;
@@ -99,11 +114,49 @@ case "\$*" in
       exit 44
     fi
     ;;
+  "volume inspect --format "*)
+    if [[ \${RECOVERY_MOUNT_CASE:-valid} == foreign ]]; then
+      printf 'other-project\\n'
+    else
+      printf '$project\\n'
+    fi
+    ;;
+  "inspect --format "*)
+    case "\${RECOVERY_MOUNT_CASE:-valid}" in
+      valid) printf 'minio-data-volume\\n' ;;
+      missing) ;;
+      ambiguous) printf 'minio-data-volume\\nother-volume\\n' ;;
+      foreign) printf 'foreign-volume\\n' ;;
+    esac
+    ;;
+  "run "*)
+    if [[ \${RECOVERY_IMAGE_CASE:-cached} == missing ]]; then
+      exit 125
+    fi
+    ;;
 esac
 EOF
 chmod 700 "$work/bin/docker"
 if ! PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$work/state" bash "$script" restore "$backup" >/dev/null; then
   printf '%s restore must copy the verified extracted MinIO archive data\n' "$script" >&2
+  exit 1
+fi
+for required in \
+  'run --rm --pull=never --network=none --cap-drop=ALL --security-opt=no-new-privileges --mount type=volume,src=minio-data-volume,dst=/data alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659'; do
+  if ! grep -Fq -- "$required" "$work/docker-args"; then
+    printf '%s restore must run the offline least-privilege helper with only MinIO data\n' "$script" >&2
+    exit 1
+  fi
+done
+
+for mount_case in missing ambiguous foreign; do
+  if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$work/state" RECOVERY_MOUNT_CASE="$mount_case" bash "$script" restore "$backup" >/dev/null 2>&1; then
+    printf '%s restore must fail closed for %s MinIO data mounts\n' "$script" "$mount_case" >&2
+    exit 1
+  fi
+done
+if PATH="$work/bin:$PATH" FRAMEOPS_LOCAL_STATE_DIR="$work/state" RECOVERY_IMAGE_CASE=missing bash "$script" restore "$backup" >/dev/null 2>&1; then
+  printf '%s restore must fail when the pinned helper image is absent from cache\n' "$script" >&2
   exit 1
 fi
 printf 'PASS: recovery contract backup is isolated and preserves both stores\n'

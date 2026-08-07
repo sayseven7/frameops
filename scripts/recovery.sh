@@ -100,7 +100,7 @@ backup() {
 }
 
 restore() {
-  local backup=$1 temporary=
+  local backup=$1 temporary= minio_data_volume minio_volume_project
   [[ -d $backup && -f $backup/postgres.dump && -f $backup/minio.tar && -f $backup/SHA256SUMS ]] || fail "invalid recovery backup: $backup"
   (cd "$backup" && sha256sum --check --status SHA256SUMS) || fail "recovery backup checksum verification failed"
   temporary=$(mktemp -d)
@@ -115,7 +115,13 @@ restore() {
     fail "restore failed; PostgreSQL and MinIO remain stopped; do not release"
   fi
   docker stop "$postgres" >/dev/null
-  if ! docker run --rm --volumes-from "$minio" alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 sh -ceu 'find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'; then
+  if ! minio_data_volume=$(docker inspect --format '{{range .Mounts}}{{if and (eq .Destination "/data") (eq .Type "volume")}}{{.Name}}{{"\n"}}{{end}}{{end}}' "$minio") || [[ -z $minio_data_volume || $(wc -w <<<"$minio_data_volume") != 1 ]]; then
+    fail "restore failed; MinIO data volume is unavailable or ambiguous"
+  fi
+  if ! minio_volume_project=$(docker volume inspect --format '{{ index .Labels "com.docker.compose.project" }}' "$minio_data_volume") || [[ $minio_volume_project != "$project" || $(wc -w <<<"$minio_volume_project") != 1 ]]; then
+    fail "restore failed; MinIO data volume does not belong to this project"
+  fi
+  if ! docker run --rm --pull=never --network=none --cap-drop=ALL --security-opt=no-new-privileges --mount "type=volume,src=$minio_data_volume,dst=/data" alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 sh -ceu 'find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'; then
     fail "restore failed; PostgreSQL and MinIO remain stopped; do not release"
   fi
   if ! docker cp "$temporary/minio/data/." "$minio:/data"; then
