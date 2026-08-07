@@ -118,14 +118,15 @@ func TestMinIOObjectLockProof(t *testing.T) {
 		t.Fatal("overwrite was accepted")
 	}
 	response, err = bucket.send(context.Background(), http.MethodDelete, key, "versionId="+url.QueryEscape(versionID), nil, 0, emptyPayloadHash, nil)
-	if err != nil {
-		t.Fatalf("delete protected object version request: %v", err)
-	}
-	if response.StatusCode < http.StatusBadRequest {
+	// MinIO may close the rejected version-delete connection instead of writing
+	// an S3 error. The later version read is the actual proof that it was refused.
+	if err == nil && response.StatusCode < http.StatusBadRequest {
 		drain(response)
 		t.Fatalf("delete protected object version status = %s, want refusal", response.Status)
 	}
-	drain(response)
+	if response != nil {
+		drain(response)
+	}
 	response, err = bucket.send(context.Background(), http.MethodDelete, key, "", nil, 0, emptyPayloadHash, nil)
 	if err != nil {
 		t.Fatalf("delete protected object request: %v", err)
