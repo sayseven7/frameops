@@ -18,6 +18,41 @@ import (
 
 const releaseE2EEnvironment = "FRAMEOPS_RELEASE_E2E"
 
+func TestReleaseComposeV2RejectsUnavailablePlugin(t *testing.T) {
+	bin := t.TempDir()
+	docker := filepath.Join(bin, "docker")
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\nprintf 'docker: compose is not a docker command\\n' >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", bin)
+
+	err := requireReleaseComposeV2()
+	if err == nil || !strings.Contains(err.Error(), "Docker Compose V2") {
+		t.Fatalf("require Compose V2 = %v, want diagnostic", err)
+	}
+}
+
+func TestReleaseRuntimeDownUsesIsolatedRuntimeState(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "scripts"), 0o700); err != nil {
+		t.Fatalf("make scripts directory: %v", err)
+	}
+	capture := filepath.Join(t.TempDir(), "capture")
+	script := filepath.Join(root, "scripts", "local-runtime.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$1\" >\"$RELEASE_CAPTURE\"\nprintf '%s\\n' \"$FRAMEOPS_LOCAL_STATE_DIR\" >>\"$RELEASE_CAPTURE\"\n"), 0o700); err != nil {
+		t.Fatalf("write fake runtime script: %v", err)
+	}
+	state := filepath.Join(t.TempDir(), "state")
+
+	output, err := releaseRuntimeDown(root, append(os.Environ(), "FRAMEOPS_LOCAL_STATE_DIR="+state, "RELEASE_CAPTURE="+capture))
+	if err != nil {
+		t.Fatalf("stop isolated runtime: %v\n%s", err, output)
+	}
+	if got, err := os.ReadFile(capture); err != nil || string(got) != "down\n"+state+"\n" {
+		t.Fatalf("runtime teardown = %q, %v; want scoped down for %q", got, err, state)
+	}
+}
+
 // TestReleaseJourney uses the shipped local-runtime launcher, whose state path
 // names a fresh Compose project and therefore fresh PostgreSQL and MinIO volumes.
 // It deliberately drives only the released binaries and HTTP API.
@@ -136,6 +171,9 @@ type releaseResponse struct {
 func startReleaseRuntime(t *testing.T) releaseRuntime {
 	t.Helper()
 	root := filepath.Clean(filepath.Join("..", ".."))
+	if err := requireReleaseComposeV2(); err != nil {
+		t.Fatal(err)
+	}
 	state := filepath.Join(t.TempDir(), "state")
 	ports := make([]int, 4)
 	for index := range ports {
@@ -150,18 +188,30 @@ func startReleaseRuntime(t *testing.T) releaseRuntime {
 		fmt.Sprintf("FRAMEOPS_API_PORT=%d", ports[2]),
 		fmt.Sprintf("FRAMEOPS_UI_PORT=%d", ports[3]),
 	)
+	t.Cleanup(func() {
+		if output, err := releaseRuntimeDown(root, command.Env); err != nil {
+			t.Errorf("stop isolated local runtime: %v\n%s", err, output)
+		}
+	})
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("start isolated local runtime: %v\n%s", err, output)
 	}
-	t.Cleanup(func() {
-		down := exec.Command("bash", "scripts/local-runtime.sh", "down")
-		down.Dir, down.Env = root, command.Env
-		if output, err := down.CombinedOutput(); err != nil {
-			t.Errorf("stop isolated local runtime: %v\n%s", err, output)
-		}
-	})
 	return releaseRuntime{state: state, api: fmt.Sprintf("http://127.0.0.1:%d", ports[2]), fops: filepath.Join(state, "bin", "fops")}
+}
+
+func requireReleaseComposeV2() error {
+	output, err := exec.Command("docker", "compose", "version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Docker Compose V2 is required for the real Compose release journey: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func releaseRuntimeDown(root string, environment []string) ([]byte, error) {
+	down := exec.Command("bash", "scripts/local-runtime.sh", "down")
+	down.Dir, down.Env = root, environment
+	return down.CombinedOutput()
 }
 
 func releasePort(t *testing.T) int {
