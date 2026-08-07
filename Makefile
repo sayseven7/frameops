@@ -12,6 +12,7 @@ test: ## run all Go tests
 	go test ./...
 	bash scripts/migrations-contract_test.sh
 	bash scripts/check-compose_test.sh
+	bash scripts/dockerignore_test.sh
 	bash scripts/local-runtime_test.sh
 	bash scripts/recovery_test.sh
 	bash scripts/deploy-contract_test.sh
